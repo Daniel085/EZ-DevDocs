@@ -3,8 +3,7 @@
 The feedback lives in the portal repository, next to the contract it is about:
 
 - **File:** `docs/contracts/guides-contract-feedback.md` in `daniel085/ez-devportal`
-- **Link:** <https://github.com/daniel085/ez-devportal/blob/claude/hopeful-darwin-fuei2f/docs/contracts/guides-contract-feedback.md>
-  (on the working branch until it is merged; after that, the same path on the default branch)
+- **Link:** <https://github.com/daniel085/ez-devportal/blob/main/docs/contracts/guides-contract-feedback.md>
 - **Companion:** `docs/contracts/guides-module-status.md` in the same directory describes what this
   module emits today, for the portal side.
 
