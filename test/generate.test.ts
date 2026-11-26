@@ -1,0 +1,92 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { generate, loadSpec, deriveOperationId, SpecError, validateBundle } from '../src/index.ts';
+import { sha256 } from '../src/spec.ts';
+
+const root = join(import.meta.dirname, '..');
+const manifestSchema = JSON.parse(readFileSync(join(root, 'contract/guides-manifest.schema.json'), 'utf8'));
+const dirs = [join(root, 'fixtures/specs'), process.env.EZ_DEVDOCS_EXTRA_SPECS].filter((d): d is string => !!d && existsSync(d));
+const specs = dirs.flatMap((d) => readdirSync(d).filter((f) => /\.(ya?ml|json)$/.test(f)).sort().map((f) => join(d, f)));
+const text = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
+
+for (const path of specs) {
+  const name = path.split('/').at(-1)!;
+  test(`${name}: produces a valid, deterministic bundle`, () => {
+    const source = readFileSync(path);
+    const a = generate(source, { manifestSchema });
+    const b = generate(source, { manifestSchema });
+
+    assert.deepEqual(a.report.validation.errors, []);
+    assert.equal(a.report.validation.ok, true);
+    assert.equal(a.manifest.spec.sha256, sha256(source), 'manifest records the hash of the exact spec bytes');
+    assert.deepEqual([...a.files.keys()], [...b.files.keys()], 'same slugs on every run');
+    for (const [file, bytes] of a.files) assert.equal(text(bytes), text(b.files.get(file)!), `${file} is identical on every run`);
+
+    // An independent pass over the written files, as the portal would do.
+    const again = validateBundle(a.files, loadSpec(source), { manifestSchema });
+    assert.deepEqual(again.errors, []);
+
+    assert.ok(a.report.pages.length > 0);
+    assert.equal(a.report.pages.length, [...a.files.keys()].filter((f) => f.startsWith('pages/')).length);
+    for (const s of a.report.skipped) assert.ok(s.page && s.reason, 'every skip has a reason');
+    for (const [file, bytes] of a.files) {
+      if (!file.endsWith('.md')) continue;
+      const body = text(bytes);
+      assert.doesNotMatch(body, /\bcurl\b|https?:\/\/[^\s)]*\/v\d+\//, `${file} holds no hand-written request`);
+      assert.doesNotMatch(body, /\]\((\/|\.\.?\/)/, `${file} has no path links`);
+    }
+  });
+}
+
+test('at least three public specs are covered', () => {
+  assert.ok(specs.filter((s) => !s.includes('synthetic')).length >= 3);
+});
+
+test('derived operation ids follow the portal rule', () => {
+  assert.equal(deriveOperationId('get', '/payments/{id}'), 'get_payments__id_');
+  assert.equal(deriveOperationId('POST', '/v1/payment-intents'), 'post_v1_payment_intents');
+  const model = loadSpec(readFileSync(join(root, 'fixtures/specs/clubhouse.json')));
+  assert.ok(model.operations.every((op) => op.derivedId && /^[a-z]+_[A-Za-z0-9_]*$/.test(op.id)));
+  assert.equal(model.issues.filter((i) => i.code === 'missing-operation-id').length, model.operations.length);
+});
+
+test('Swagger 2.0 and non-specs are refused with a clear error', () => {
+  assert.throws(() => loadSpec('{"swagger":"2.0","paths":{}}'), SpecError);
+  assert.throws(() => loadSpec('just: text'), SpecError);
+  assert.throws(() => loadSpec('{ not json'), SpecError);
+});
+
+test('petstore: quickstart, flows and report', () => {
+  const r = generate(readFileSync(join(root, 'fixtures/specs/petstore.yaml')), { manifestSchema });
+  const page = (slug: string) => text(r.files.get(`pages/${slug}.md`)!);
+  assert.equal(r.manifest.nav[0].page, 'quickstart');
+  assert.match(page('quickstart'), /<Step title="Get your credentials">[\s\S]*<Step title="Make your first call">[\s\S]*<Sample operation="[A-Za-z]+"[\s\S]*<Response /);
+  assert.match(page('pet/manage'), /<Sample operation="addPet" capture="pet_id=\$\.id">/);
+  assert.match(page('pet/manage'), /"petId": "\{\{pet_id\}\}"/);
+  assert.ok(r.report.skipped.some((s) => s.page === 'pagination'));
+  assert.ok(r.report.gaps.some((g) => g.page === 'quickstart' && /credentials/.test(g.message)));
+});
+
+test('museum: named examples and webhooks are used', () => {
+  const r = generate(readFileSync(join(root, 'fixtures/specs/museum.yaml')), { manifestSchema });
+  const all = [...r.files].filter(([f]) => f.endsWith('.md')).map(([, b]) => text(b)).join('\n');
+  assert.match(all, /<Sample operation="[A-Za-z]+" example="[A-Za-z0-9_.-]+"/);
+  assert.match(text(r.files.get('pages/webhooks.md')!), /\(schema:SpecialEvent\)/);
+});
+
+test('synthetic: hostile descriptions are neutralized, values are carried between calls', () => {
+  const r = generate(readFileSync(join(root, 'fixtures/specs/synthetic-orders.yaml')), { manifestSchema });
+  const page = (slug: string) => text(r.files.get(`pages/${slug}.md`)!);
+  assert.equal(r.report.validation.ok, true);
+  const quickstart = page('quickstart');
+  assert.doesNotMatch(quickstart, /<script|<b>|alert\(1\)|\]\(\/docs/);
+  assert.doesNotMatch(quickstart, /(^|[^\\])\{\{legacy/);
+  assert.match(page('pagination'), /capture="next_cursor=\$\.next_cursor"[\s\S]*"cursor": "\{\{next_cursor\}\}"/);
+  assert.match(page('idempotency'), /"Idempotency-Key": "\{\{idempotency_key\}\}"/);
+  assert.match(page('tutorials/stores-orders'), /capture="store_id=\$\.id"[\s\S]*"storeId": "\{\{store_id\}\}"[\s\S]*"orderId": "\{\{order_id\}\}"/);
+  assert.match(page('tutorials/stores-orders'), /"sku": "ABC-1234"/, 'spec examples win over placeholders');
+  assert.ok(!r.files.has('pages/reports/browse.md'), 'deprecated operations get no guide');
+  assert.ok(r.report.pages.find((p) => p.page === 'stores/manage')!.placeholderValues.length > 0);
+});

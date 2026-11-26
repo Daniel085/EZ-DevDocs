@@ -1,0 +1,24 @@
+{
+  "name": "ez-devdocs",
+  "version": "0.1.0",
+  "description": "Generates developer guides (a guides bundle) from an OpenAPI 3.x specification, for EZ-DevPortal.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.18" },
+  "bin": { "ez-devdocs": "./src/cli.ts" },
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "generate": "node src/cli.ts generate"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1",
+    "ajv-formats": "^3.0.1",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
