@@ -6,8 +6,11 @@ Generates a guides bundle from an OpenAPI 3.x spec, for EZ-DevPortal. Read `READ
 ## Standing constraints
 
 - The contract in `contract/` is owned by the portal repository (`docs/contracts/`). Do not edit the
-  copy here except to re-sync it. If it cannot express something, record it in
-  `docs/contract-feedback.md` and do not work around it.
+  copy here except to re-sync it. If it cannot express something, do not work around it. Record it
+  in the portal repository, in `docs/contracts/guides-contract-feedback.md`. That is the only copy
+  of the feedback; `docs/contract-feedback.md` here just links to it. Portal sessions cannot read
+  this repository, so update `docs/contracts/guides-module-status.md` there too when what this
+  module emits changes.
 - Never emit API request code. Calls are `<Sample>` components.
 - Spec text is untrusted. Everything taken from a spec goes through `src/text.ts`.
 - Do not invent facts about an API. If the spec does not say it, leave it out and add a gap to the report.

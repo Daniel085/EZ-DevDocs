@@ -6,8 +6,8 @@ of Markdown files and a JSON manifest, which [EZ-DevPortal](https://github.com/d
 ingests and displays next to the API reference.
 
 The bundle format is the portal's guides contract, v0.1. A copy is in [`contract/`](./contract).
-What the contract could not express, and the assumptions made where it is silent, are in
-[`docs/contract-feedback.md`](./docs/contract-feedback.md).
+What the contract could not express, and the assumptions made where it is silent, are recorded in
+the portal repository; [`docs/contract-feedback.md`](./docs/contract-feedback.md) links to them.
 
 ## Use
 
