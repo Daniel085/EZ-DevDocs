@@ -4,6 +4,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { generate, loadSpec, deriveOperationId, SpecError, validateBundle } from '../src/index.ts';
 import { sha256 } from '../src/spec.ts';
+import { attr, code, meta, prose } from '../src/text.ts';
 
 const root = join(import.meta.dirname, '..');
 const manifestSchema = JSON.parse(readFileSync(join(root, 'contract/guides-manifest.schema.json'), 'utf8'));
@@ -89,4 +90,18 @@ test('synthetic: hostile descriptions are neutralized, values are carried betwee
   assert.match(page('tutorials/stores-orders'), /"sku": "ABC-1234"/, 'spec examples win over placeholders');
   assert.ok(!r.files.has('pages/reports/browse.md'), 'deprecated operations get no guide');
   assert.ok(r.report.pages.find((p) => p.page === 'stores/manage')!.placeholderValues.length > 0);
+});
+
+test('spec text cannot become active syntax', () => {
+  assert.equal(code('a|<img src=x>'), 'a\\|');
+  assert.equal(code('^(a|b)$'), '^(a\\|b)$');
+  assert.doesNotMatch(code('a\rb'), /\r/);
+  assert.equal(code('limit'), '`limit`');
+  assert.equal(prose('- item'), '\\- item');
+  assert.equal(prose('1. item'), '1\\. item');
+  assert.equal(prose('~~~'), '\\~\\~\\~');
+  assert.equal(prose('&#123;&#123;api_key&#125;&#125;'), '\\&\\#123;\\&\\#123;api\\_key\\&\\#125;\\&\\#125;');
+  assert.equal(prose('see {{api_key}} and <b>x</b>'), 'see \\{\\{api\\_key\\}\\} and x');
+  assert.equal(attr('&quot; onclick=&quot;x "y" {z}'), "quot; onclick=quot;x 'y' :z");
+  assert.equal(meta('A <b>[x](y)</b> ~~c~~ {d}'), 'A x c d');
 });

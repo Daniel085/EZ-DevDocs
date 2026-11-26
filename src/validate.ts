@@ -188,6 +188,50 @@ interface PageContext {
 
 const REQUEST_CODE = /(^|[\s;&|(])(curl|wget|http(ie)?)\s+(-|https?:|\{\{|["']?https?:|(GET|POST|PUT|PATCH|DELETE)\b)|\b(fetch|axios(\.\w+)?|requests\.(get|post|put|patch|delete)|http\.request)\s*\(\s*[`"'f]*\{\{\s*base_url/im;
 
+/** True when the character at `i` is escaped: preceded by an odd number of backslashes. */
+function escaped(line: string, i: number): boolean {
+  let n = 0;
+  while (i - 1 - n >= 0 && line[i - 1 - n] === '\\') n++;
+  return n % 2 === 1;
+}
+
+/** Blanks out inline code spans, matching backtick runs of equal length as CommonMark does. */
+function blankCodeSpans(line: string): string {
+  let out = '';
+  let i = 0;
+  while (i < line.length) {
+    if (line[i] !== '`' || escaped(line, i)) {
+      out += line[i++];
+      continue;
+    }
+    let run = 1;
+    while (line[i + run] === '`') run++;
+    let j = i + run;
+    let close = -1;
+    while (j < line.length) {
+      if (line[j] !== '`') {
+        j++;
+        continue;
+      }
+      let r = 1;
+      while (line[j + r] === '`') r++;
+      if (r === run) {
+        close = j;
+        break;
+      }
+      j += r;
+    }
+    if (close < 0) {
+      out += line.slice(i, i + run);
+      i += run;
+    } else {
+      out += ' '.repeat(close + run - i);
+      i = close + run;
+    }
+  }
+  return out;
+}
+
 function validatePage(file: string, text: string, ctx: PageContext): void {
   const { model, add } = ctx;
   const err = (code: string, message: string, line?: number) => add('error', code, file, message, line);
@@ -218,7 +262,7 @@ function validatePage(file: string, text: string, ctx: PageContext): void {
             const v = fm[k];
             if (typeof v !== 'string' || !v.trim()) err('invalid-frontmatter', `'${k}' is required and must be text.`, 1);
             else if (v.length > max) err('invalid-frontmatter', `'${k}' is longer than ${max} characters.`, 1);
-            else if (/[<>{}\n]/.test(v)) err('invalid-frontmatter', `'${k}' must be plain text.`, 1);
+            else if (/[<>{}`\r\n\u2028\u2029]|\]\(|&#?\w+;/.test(v)) err('invalid-frontmatter', `'${k}' must be plain text.`, 1);
           };
           str('title', 80);
           str('description', 200);
@@ -242,9 +286,9 @@ function validatePage(file: string, text: string, ctx: PageContext): void {
   let prevText = false;
 
   const checkVariables = (s: string, line: number) => {
-    for (const m of s.matchAll(/(\\?)\{\{([^{}]*)\}\}/g)) {
-      if (m[1]) continue;
-      const name = m[2]!.trim();
+    for (const m of s.matchAll(/\{\{([^{}]*)\}\}/g)) {
+      if (escaped(s, m.index!)) continue;
+      const name = m[1]!.trim();
       if (!variables.has(name)) err('unknown-variable', `Unknown variable '{{${name}}}'.`, line);
     }
   };
@@ -372,8 +416,14 @@ function validatePage(file: string, text: string, ctx: PageContext): void {
       }
       continue;
     }
-    const open = /^ {0,3}(`{3,}|~{3,})\s*(.*)$/.exec(raw);
+    if (/^\s+(>\s*|[-*+]\s+|\d+[.)]\s+)*(`{3,}|~{3,})/.test(raw) || /^(>\s*|[-*+]\s+|\d+[.)]\s+)+(`{3,}|~{3,})/.test(raw)) {
+      err('unsupported-syntax', 'Code blocks must start at the left margin, outside lists and quotes, so they can be checked.', n);
+      continue;
+    }
+    const open = /^(`{3,}|~{3,})\s*(.*)$/.exec(raw);
     if (open) {
+      checkVariables(raw, n);
+      if (/\{/.test(raw.replace(/\{\{[^{}]*\}\}/g, ''))) err('disallowed-syntax', 'Braces are not allowed in a code block info string.', n);
       const info = open[2]!.trim();
       const m = /^([A-Za-z0-9_+#.-]*)((?:\s+(?:title|highlight)="[^"]*")*)$/.exec(info);
       if (!m) err('invalid-code-info', `Code block info string '${info}' is not a language followed by title="…" or highlight="…".`, n);
@@ -387,18 +437,20 @@ function validatePage(file: string, text: string, ctx: PageContext): void {
     }
 
     // Prose. Inline code spans are opaque.
-    const line = raw.replace(/(`+)(.+?)\1/g, (s) => ' '.repeat(s.length));
+    const line = blankCodeSpans(raw);
     if (sample && line.trim() && !/^\s*<\/Sample>\s*$/.test(line)) err('invalid-sample', 'A <Sample> may contain only one fenced json block.', n);
-    if (/^ {0,3}#(\s|$)/.test(line)) err('heading-h1', 'The body must not contain an h1. Headings start at h2.', n);
-    if (/^ {0,3}=+\s*$/.test(line) && prevText) err('heading-h1', 'The body must not contain an h1. Headings start at h2.', n);
+    if (/^\s*<Sample\b[^>]*[^/]>\s*\S/.test(line)) err('invalid-sample', 'Nothing may follow an opening <Sample> tag on its line.', n);
+    const inner = line.replace(/^(\s*(>|[-*+](?=\s)|\d+[.)](?=\s)))+/, '');
+    if (/^\s*#(\s|$)/.test(inner)) err('heading-h1', 'The body must not contain an h1. Headings start at h2.', n);
+    if (/^\s*=+\s*$/.test(inner) && prevText) err('heading-h1', 'The body must not contain an h1. Headings start at h2.', n);
     if (/^(import|export)\s/.test(line)) err('disallowed-syntax', 'import and export statements are not allowed.', n);
-    prevText = line.trim() !== '' && !/^ {0,3}(#|>|[-*+]\s|\d+\.\s|<)/.test(line);
+    prevText = raw.trim() !== '';
 
     // Tags and raw HTML
     for (let at = line.indexOf('<'); at >= 0; at = line.indexOf('<', at + 1)) {
-      if (line[at - 1] === '\\') continue;
+      if (escaped(line, at)) continue;
       const rest = line.slice(at);
-      const tag = /^<(\/?)([A-Za-z][A-Za-z0-9]*)(?=[\s/>])([^>]*?)(\/?)>/.exec(rest);
+      const tag = /^<(\/?)([A-Za-z][A-Za-z0-9]*)(?=[\s/>])((?:[^>"]|"[^"]*")*?)(\/?)>/.exec(rest);
       if (tag) {
         const name = tag[2]!;
         if (/^[A-Z]/.test(name)) handleTag(tag[1] === '/', name, tag[3]!, tag[4] === '/', n);
@@ -415,16 +467,36 @@ function validatePage(file: string, text: string, ctx: PageContext): void {
 
     // Variables and stray braces
     checkVariables(line, n);
-    if (/\{/.test(line.replace(/\\?\{\{[^{}]*\}\}/g, '').replace(/\\\{/g, ''))) err('disallowed-syntax', 'JSX expressions are not allowed. Write a literal brace as \\{.', n);
+    if ([...line.replace(/\{\{[^{}]*\}\}/g, (m) => ' '.repeat(m.length)).matchAll(/\{/g)].some((m) => !escaped(line, m.index!))) err('disallowed-syntax', 'JSX expressions are not allowed. Write a literal brace as \\{.', n);
 
     // Links and images
-    for (const m of line.matchAll(/(!?)\[((?:[^\]\\]|\\.)*)\]\(\s*([^)\s]*)(?:\s+"[^"]*")?\s*\)/g)) {
-      if (line[m.index! - 1] === '\\') continue;
-      checkTarget(m[3]!, n, m[1] === '!');
-      if (m[1] === '!' && !m[2]!.trim()) warn('image-missing-alt', 'Image has no alt text.', n);
+    for (let at = line.indexOf(']('); at >= 0; at = line.indexOf('](', at + 1)) {
+      if (escaped(line, at)) continue;
+      const dest = /^\s*(?:<([^>]*)>|([^\s)]*))/.exec(line.slice(at + 2))!;
+      const target = dest[1] ?? dest[2] ?? '';
+      // Find the opening bracket to tell an image from a link.
+      let depth = 0;
+      let start = -1;
+      for (let k = at - 1; k >= 0; k--) {
+        if (line[k] === ']' && !escaped(line, k)) depth++;
+        else if (line[k] === '[' && !escaped(line, k)) {
+          if (depth === 0) {
+            start = k;
+            break;
+          }
+          depth--;
+        }
+      }
+      const image = start > 0 && line[start - 1] === '!';
+      if (!target) err('link-not-allowed', 'A link destination must follow on the same line.', n);
+      else checkTarget(target, n, image);
+      if (image && !line.slice(start + 1, at).trim()) warn('image-missing-alt', 'Image has no alt text.', n);
     }
-    const def = /^ {0,3}\[[^\]]+\]:\s*(\S+)/.exec(line);
-    if (def) checkTarget(def[1]!.replace(/^<|>$/g, ''), n, false);
+    const def = /^\s*(?:>\s*)*\[(?!\^)[^\]]+\]:\s*(\S*)/.exec(line);
+    if (def) {
+      if (!def[1]) err('link-not-allowed', 'A link definition must have its destination on the same line.', n);
+      else checkTarget(def[1].replace(/^<|>$/g, ''), n, false);
+    }
   }
 
   if (fence) err('disallowed-syntax', 'Code block is not closed.', fence.line);

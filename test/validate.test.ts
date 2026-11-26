@@ -52,6 +52,13 @@ test('accepts everything the contract allows', () => {
     '{ "path": { "storeId": "{{store_id}}" } }',
     '```',
     '</Sample>',
+    'A footnote[^1], an escaped \\<b\\> and \\{brace\\}.',
+    '',
+    '[^1]: The note.',
+    '',
+    '<Callout type="note" title="a > b">',
+    'x',
+    '</Callout>',
     '- [x] task',
     '',
     '| a | b |',
@@ -99,6 +106,22 @@ const rejects: [string, string, string][] = [
   ['hand-written fetch', '```js\nawait fetch(`{{base_url}}/stores`)\n```', 'api-request-code'],
   ['unclosed component', '<Steps>\n<Step title="a">\nx\n</Step>', 'unbalanced-component'],
   ['step outside steps', '<Step title="a">\nx\n</Step>', 'invalid-nesting'],
+  ['raw HTML after an escaped backslash', 'a \\\\<img src=x onerror=alert(1)>', 'disallowed-syntax'],
+  ['raw HTML in a mismatched code span', '`` <img src=x> `', 'disallowed-syntax'],
+  ['raw HTML behind escaped backticks', '\\` <img src=x> \\`', 'disallowed-syntax'],
+  ['unknown variable after an escaped backslash', '\\\\{{secret}}', 'unknown-variable'],
+  ['fence inside a list', '- a\n  ```\n  code\n<img src=x>\n```', 'unsupported-syntax'],
+  ['path link with a single-quoted title', "[x](/reference/op 't')", 'link-not-allowed'],
+  ['link with nested brackets', '[a [b] c](javascript:alert(1))', 'link-not-allowed'],
+  ['path link around an image', '[![alt](https://example.com/a.png)](/reference/op)', 'link-not-allowed'],
+  ['link destination on the next line', '[a](\n/reference/op)', 'link-not-allowed'],
+  ['link definition in a quote', '[x][r]\n\n> [r]: javascript:alert(1)', 'link-not-allowed'],
+  ['link definition split over lines', '[x][r]\n\n[r]:\n/reference/op', 'link-not-allowed'],
+  ['h1 in a quote', '> # Title', 'heading-h1'],
+  ['h1 in a list', '- # Title', 'heading-h1'],
+  ['setext h1 under a code span', '`Title`\n=====', 'heading-h1'],
+  ['variable in a code info string', '```bash title="{{secret}}"\nls\n```', 'unknown-variable'],
+  ['prose after an opening Sample tag', '<Sample operation="get_stores"> hello\n```json\n{}\n```\n</Sample>', 'invalid-sample'],
   ['bad code info', '```bash onclick="x"\nls\n```', 'invalid-code-info'],
 ];
 for (const [name, body, code] of rejects) {
@@ -106,6 +129,7 @@ for (const [name, body, code] of rejects) {
 }
 
 test('frontmatter rules', () => {
+  assert.ok(codes(check('x\n', { frontmatter: '---\ntitle: "[a](http://x.example)"\ndescription: D\ntype: how-to\n---\n' })).includes('invalid-frontmatter'));
   assert.ok(codes(check('x\n', { frontmatter: 'no frontmatter\n' })).includes('invalid-frontmatter'));
   assert.ok(codes(check('x\n', { frontmatter: `---\ntitle: ${'t'.repeat(81)}\ndescription: D\ntype: how-to\n---\n` })).includes('invalid-frontmatter'));
   assert.ok(codes(check('x\n', { frontmatter: '---\ntitle: T\ndescription: D\ntype: blog\n---\n' })).includes('invalid-frontmatter'));

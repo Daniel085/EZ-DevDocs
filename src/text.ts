@@ -26,12 +26,15 @@ export function plainText(input: string | undefined, max = 0): string {
 
 /** Plain text for frontmatter: no angle brackets or braces. */
 export function meta(input: string | undefined, max = 0): string {
-  return plainText(input, max).replace(/[<>{}]/g, '').replace(/\s+/g, ' ').trim();
+  return plainText(input, max).replace(/[<>{}\[\]*~]/g, '').replace(/&(?=#?\w+;)/g, '').replace(/\s+/g, ' ').trim();
 }
 
 /** Plain text, escaped so it is inert when placed in a Markdown paragraph or table cell. */
 export function prose(input: string | undefined, max = 0): string {
-  return plainText(input, max).replace(/([\\<>{}\[\]|*_#])/g, '\\$1');
+  return plainText(input, max)
+    .replace(/([\\<>{}\[\]|*_#~`&])/g, '\\$1')
+    .replace(/^([-+=])/, '\\$1')
+    .replace(/^(\d+)([.)])/, '$1\\$2');
 }
 
 /** Text for a component attribute: one line, no quotes or braces. */
@@ -39,13 +42,14 @@ export function attr(input: string, max = 80): string {
   const t = plainText(input, max)
     .replace(/"/g, "'")
     .replace(/\{+([^{}]*)\}+/g, ':$1')
-    .replace(/[<>{}]/g, '');
+    .replace(/[<>{}]/g, '')
+    .replace(/&(?=#?\w+;)/g, '');
   return t.replace(/[.\s]+$/, '');
 }
 
 /** Inline code. Falls back to escaped prose when the text cannot sit safely in a code span. */
 export function code(input: string): string {
-  return /[`\n]|\{\{/.test(input) || input === '' ? prose(input) : '`' + input + '`';
+  return /[`\n\r|\\]|\{\{/.test(input) || input.trim() === '' ? prose(input) : '`' + input + '`';
 }
 
 export function slugify(input: string): string {

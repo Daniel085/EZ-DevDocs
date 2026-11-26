@@ -60,6 +60,8 @@ Each of these should be confirmed or corrected. The module's validator enforces 
 | 13 | Nav labels | The schema allows `label` on a page entry; the contract text does not mention it. Not used. |
 | 14 | Hand-written request code | The contract forbids it but names no check. The validator rejects code blocks that run `curl`, `wget` or `http`, or that call `fetch`, `axios` or `requests` against `{{base_url}}`. |
 | 15 | Unknown header in a sample | A header that is not a declared parameter of the operation is an error. |
+| 17 | Bare URLs in prose | GFM autolink literals are not in the contract's dialect, so a bare `http://…` taken from a spec description is assumed to render as text. If the portal enables them, non-https links could appear; say so and the module will break them up. |
+| 18 | Entities | Text taken from specs has `&` escaped, so `&#123;&#123;api_key&#125;&#125;` in a description cannot become a variable. The portal should substitute variables before, not after, decoding entities. |
 | 16 | OpenAPI 3.2 | Read as 3.1 and reported. The contract names 3.x. |
 
 ## Error codes used by this module's validator
@@ -70,6 +72,6 @@ Errors: `missing-manifest`, `invalid-manifest`, `unsupported-contract-version`, 
 `unknown-attribute`, `invalid-attribute`, `invalid-nesting`, `unbalanced-component`,
 `unknown-variable`, `unknown-operation`, `unknown-schema`, `unknown-guide`, `unknown-asset`,
 `unknown-response`, `unknown-example`, `link-not-allowed`, `invalid-sample`, `invalid-capture`,
-`invalid-code-info`, `api-request-code`.
+`invalid-code-info`, `api-request-code`, `unsupported-syntax`.
 
 Warnings: `spec-hash-mismatch`, `deprecated-operation`, `image-missing-alt`, `page-unreferenced`.

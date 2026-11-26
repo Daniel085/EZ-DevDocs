@@ -114,3 +114,8 @@ across runs, and checks that the validator rejects each kind of contract violati
 - Only local `$ref`s are followed. Multi-file specs must be bundled first.
 - Request bodies other than JSON and form-encoded are not sampled.
 - OpenAPI 3.2 is read as 3.1 and reported as untested.
+- The validator scans pages line by line; it is not a full CommonMark parser. Where it cannot be
+  sure, it rejects: code blocks must start at the left margin (not inside lists or quotes), tags and
+  link destinations must fit on one line, and indented code blocks are read as prose. It is therefore
+  stricter than the contract on hand-written bundles. The check for hand-written request code is a
+  heuristic (`curl`, `wget`, or an HTTP client called against `{{base_url}}`).
