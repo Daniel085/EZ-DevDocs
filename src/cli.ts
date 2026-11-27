@@ -10,7 +10,8 @@ import { validateBundle, type BundleFiles } from './validate.ts';
 
 const USAGE = `Usage:
   ez-devdocs generate <spec> [--out <dir>] [--no-timestamp] [--json]
-      Writes <dir>/guides (the bundle) and <dir>/report.json. Default <dir> is ./out.
+      Writes <dir>/guides (the bundle), <dir>/report.json and <dir>/spec-audit.md.
+      Default <dir> is ./out.
   ez-devdocs validate <bundle-dir> --spec <spec> [--json]
       Checks an existing bundle against the contract.
 
@@ -55,7 +56,8 @@ function main(argv: string[]): number {
       writeFileSync(full, bytes);
     }
     writeFileSync(join(out, 'report.json'), JSON.stringify(result.report, null, 2) + '\n');
-    process.stdout.write(json ? JSON.stringify(result.report, null, 2) + '\n' : summarize(result.report) + `\nBundle: ${bundleDir}\nReport: ${join(out, 'report.json')}\n`);
+    writeFileSync(join(out, 'spec-audit.md'), result.auditMarkdown);
+    process.stdout.write(json ? JSON.stringify(result.report, null, 2) + '\n' : summarize(result.report) + `\nBundle: ${bundleDir}\nReport: ${join(out, 'report.json')}\nAudit:  ${join(out, 'spec-audit.md')}\n`);
     return result.report.validation.ok ? 0 : 1;
   }
   if (command === 'validate' && positional[0] && option('--spec')) {

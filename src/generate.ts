@@ -2,6 +2,7 @@
 // Pure: returns the bundle's files in memory. Writing them is the caller's job.
 
 import { findResources } from './analyze.ts';
+import { auditSpec, renderAudit, type AuditFinding } from './audit.ts';
 import {
   authenticationPage,
   errorsPage,
@@ -40,6 +41,8 @@ export interface RunReport {
   gaps: { page: string; message: string }[];
   /** Problems in the spec itself, grouped by code. */
   specIssues: { code: string; count: number; examples: string[] }[];
+  /** What the owner of the spec should fix, most serious first. Written on every run. */
+  audit: AuditFinding[];
   validation: ValidationReport;
 }
 
@@ -47,6 +50,8 @@ export interface GenerateResult {
   files: BundleFiles;
   manifest: Json;
   report: RunReport;
+  /** The audit as Markdown, for the owner of the spec. Not part of the bundle. */
+  auditMarkdown: string;
 }
 
 function build(ctx: Ctx): Result[] {
@@ -134,6 +139,7 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
   const noSummary = model.operations.filter((op) => !op.summary && !op.description);
   if (noSummary.length) issues.set('no-description', noSummary.map((op) => ({ code: 'no-description', message: `${op.id} has no summary or description.` })));
 
+  const audit = auditSpec(model);
   const report: RunReport = {
     generator: GENERATOR,
     contractVersion: CONTRACT_VERSION,
@@ -142,9 +148,11 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
     skipped,
     gaps: pages.flatMap((p) => p.gaps.map((message) => ({ page: p.slug, message }))),
     specIssues: [...issues].map(([code, list]) => ({ code, count: list.length, examples: list.slice(0, 5).map((i) => i.message) })),
+    audit,
     validation,
   };
-  return { files: bundle.files, manifest: bundle.manifest, report };
+  const auditMarkdown = renderAudit(model, audit, { pages: pages.length, skipped: skipped.length, operationsInGuides: new Set(pages.flatMap((p) => p.operations)).size });
+  return { files: bundle.files, manifest: bundle.manifest, report, auditMarkdown };
 }
 
 /** A short, human-readable account of a run. */
@@ -165,6 +173,8 @@ export function summarize(report: RunReport): string {
     out.push('', 'Spec issues:');
     for (const i of report.specIssues) out.push(`  ${i.code}: ${i.count}`);
   }
+  out.push('', `Spec audit: ${report.audit.length} findings for the owner of the spec`);
+  for (const f of report.audit) out.push(`  ${f.severity.padEnd(6)} ${f.title}: ${f.count} of ${f.of} ${f.unit}`);
   const v = report.validation;
   out.push('', `Contract validation: ${v.ok ? 'passed' : 'FAILED'} (${v.errors.length} errors, ${v.warnings.length} warnings)`);
   for (const e of v.errors.slice(0, 20)) out.push(`  ${e.file}${e.line ? ':' + e.line : ''} ${e.code}: ${e.message}`);
