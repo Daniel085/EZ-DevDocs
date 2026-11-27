@@ -82,6 +82,12 @@ nothing keeps its example value and is listed as a gap in the report.
 | Deprecated operations | Not used in guides. |
 | Swagger 2.0, unparseable input | Refused with an error. |
 
+## Specs served in pieces
+
+Some APIs do not publish one OpenAPI file. `scripts/fetch-retavon-spec.mjs` assembles one for the
+Retavon API from its per-operation and per-schema reads; it needs an API key in `RETAVON_API_KEY`.
+The assembled document belongs to the API's owner and is not kept in this repository.
+
 ## The report
 
 `report.json` lists, per run: the pages produced and their operations, everything skipped and why,
