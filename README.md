@@ -49,6 +49,12 @@ const { files, manifest, report } = generate(specBytes, { manifestSchema });
 How-to guides and tutorials are flows. The first call captures an identifier from its response and
 every later call uses it, so a guide never repeats what the reference already says about one endpoint.
 
+A request body can also refer to another record by identifier, such as `customer_id` on a site. When
+the field has the name of the path parameter of a resource the spec can create, the guide creates
+that record first, captures its identifier and sends it in place of the example value. Up to five
+such steps are added to a page, each one after whatever its own body needs. A field that matches
+nothing keeps its example value and is listed as a gap in the report.
+
 ## Rules it holds itself to
 
 - **No request code.** Every call is a `<Sample>`. The portal writes the code.

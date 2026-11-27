@@ -78,6 +78,15 @@ export function plural(noun: string): string {
   return noun + 's';
 }
 
+export function singular(noun: string): string {
+  const parts = noun.split(' ');
+  let w = parts.pop()!;
+  if (/ies$/.test(w)) w = w.slice(0, -3) + 'y';
+  else if (/(ss|x|ch|sh)es$/.test(w)) w = w.slice(0, -2);
+  else if (/s$/.test(w) && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
+  return [...parts, w].join(' ');
+}
+
 export const capitalize = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
 
 /** YAML frontmatter. JSON strings are valid YAML double-quoted scalars. */

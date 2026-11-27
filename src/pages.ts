@@ -2,6 +2,7 @@
 // Nothing here writes API request code: calls are always <Sample> components.
 
 import {
+  bindBodyIds,
   buildValues,
   findErrors,
   findIdempotency,
@@ -10,11 +11,16 @@ import {
   firstIdPathInList,
   idPathInResponse,
   idVariable,
+  newPrereqState,
   type BuiltValues,
+  type Prerequisite,
+  type PrereqState,
   type Resource,
 } from './analyze.ts';
 import { deref, schemaRefName, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
-import { attr, capitalize, code, frontmatter, meta, plainText, prose } from './text.ts';
+import { attr, capitalize, code, frontmatter, meta, plainText, prose, singular } from './text.ts';
+
+export { singular };
 import type { SchemaChecker } from './values.ts';
 
 export type PageType = 'quickstart' | 'concept' | 'how-to' | 'tutorial';
@@ -58,15 +64,6 @@ const usableSchema = (name: string) => /^[A-Za-z0-9_.\-]+$/.test(name);
 const opLink = (op: Operation) => (usableId(op.id) ? `[${code(op.id)}](op:${op.id})` : code(op.id));
 const schemaLink = (name: string) => (usableSchema(name) ? `[${code(name)}](schema:${name})` : code(name));
 const article = (noun: string) => (/^[aeiou]/i.test(noun) ? `an ${noun}` : `a ${noun}`);
-
-export function singular(noun: string): string {
-  const parts = noun.split(' ');
-  let w = parts.pop()!;
-  if (/ies$/.test(w)) w = w.slice(0, -3) + 'y';
-  else if (/(ss|x|ch|sh)es$/.test(w)) w = w.slice(0, -2);
-  else if (/s$/.test(w) && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
-  return [...parts, w].join(' ');
-}
 
 class Doc {
   lines: string[] = [];
@@ -416,6 +413,30 @@ function step(d: Doc, title: string, op: Operation, built: BuiltValues, capture?
   d.add(after, '</Step>');
 }
 
+/** Steps that create the records a later request body refers to by identifier. */
+function prerequisiteSteps(d: Doc, ctx: Ctx, pre: PrereqState): void {
+  for (const p of pre.steps) {
+    const one = singular(p.resource.noun);
+    const summary = prose(p.op.summary, 160).replace(/[.\s]+$/, '');
+    d.add(`<Step title="${attr(`Create ${article(one)} to refer to`)}">`);
+    d.add(`The request body of ${opLink(p.neededBy)} refers to ${article(one)} by ${code(p.field)}, so this guide creates one first.`, `Call ${opLink(p.op)}${summary ? `: ${summary}.` : '.'}`);
+    d.sample(p.op, p.built, { capture: [p.variable, p.idPath] });
+    d.add(`The identifier is at ${code(p.idPath)} in the response. Later steps send it as ${code(p.field)}.`);
+    const guide = `${p.resource.slug}/manage`;
+    if (ctx.has(guide)) d.add(`For more on ${p.resource.noun}, see [${capitalize(p.resource.noun)}](guide:${guide}).`);
+    d.add('</Step>');
+  }
+  if (pre.unresolved.size) {
+    d.gaps.push(`Samples send example values for ${[...pre.unresolved].sort().map((f) => `'${f}'`).join(', ')}, which no earlier step produces. Say where a reader gets them.`);
+  }
+}
+
+const prerequisiteIntro = (pre: PrereqState) => {
+  const nouns = [...new Set(pre.steps.map((p) => article(singular(p.resource.noun))))];
+  if (!nouns.length) return '';
+  return ` Before that, it creates ${nouns.length > 1 ? `${nouns.slice(0, -1).join(', ')} and ${nouns.at(-1)}` : nouns[0]}, which the requests refer to by identifier.`;
+};
+
 export function resourcePage(ctx: Ctx, r: Resource): Result {
   const { model, checker } = ctx;
   const one = singular(r.noun);
@@ -459,6 +480,11 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
     if (b.ok) follow.push([`List ${r.noun}`, r.list, b]);
   }
   tryAdd(`Delete the ${one}`, r.remove);
+  // Identifiers in request bodies: the resource's own comes from the first call, others from
+  // records created beforehand.
+  const pre = newPrereqState([variable]);
+  if (source === 'create') first = bindBodyIds(model, checker, ctx.resources, r.create!, first, pre, { exclude: [r] });
+  for (const f of follow) f[2] = bindBodyIds(model, checker, ctx.resources, f[1], f[2], pre, { exclude: [r], available: { [r.idParam]: `{{${variable}}}` } });
   const slug = source === 'create' ? manage : `${r.slug}/browse`;
   if (follow.filter(([, op]) => op !== r.list).length === 0) return { page: slug, reason: `only one usable operation on ${r.noun}${notes.length ? ` (${notes.join(' ')})` : ''}; a guide would restate the reference` };
 
@@ -467,9 +493,10 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
   const verbs = follow.map(([, op]) => (op === r.get ? 'retrieve' : op === r.update ? 'update' : op === r.remove ? 'delete' : 'list'));
   const list = verbs.length > 1 ? `${verbs.slice(0, -1).join(', ')} and ${verbs.at(-1)}` : verbs[0]!;
   const firstOp = source === 'create' ? r.create! : r.list!;
-  if (source === 'create') d.add(`This guide creates ${article(one)}, then uses its identifier to ${list} it. Each step carries the identifier forward from the first call.`);
-  else d.add(`This guide lists ${r.noun}, takes the identifier of the first one, and uses it to ${list} it.`);
+  if (source === 'create') d.add(`This guide creates ${article(one)}, then uses its identifier to ${list} it. Each step carries the identifier forward from the call that creates it.${prerequisiteIntro(pre)}`);
+  else d.add(`This guide lists ${r.noun}, takes the identifier of the first one, and uses it to ${list} it.${prerequisiteIntro(pre)}`);
   d.add('<Steps>');
+  prerequisiteSteps(d, ctx, pre);
   d.add(`<Step title="${attr(source === 'create' ? `Create ${article(one)}` : `List ${r.noun}`)}">`, opIntro(firstOp));
   d.sample(firstOp, first, { capture: [variable, path] });
   d.response(model, firstOp);
@@ -489,18 +516,20 @@ export function nestedTutorial(ctx: Ctx, parent: Resource, child: Resource): Res
   const ok = (op: Operation | undefined): op is Operation => !!op && usableId(op.id);
   if (!ok(parent.create) || !parent.idParam || !ok(child.create)) return { page: slug, reason: 'parent or child has no create operation' };
   const pVar = idVariable(parent);
-  const pBuilt = buildValues(model, checker, parent.create);
+  const pre = newPrereqState([pVar]);
+  const pBuilt = bindBodyIds(model, checker, ctx.resources, parent.create, buildValues(model, checker, parent.create), pre, { exclude: [parent, child] });
   const pPath = idPathInResponse(model, parent.create, parent.idParam);
   if (!pBuilt.ok || !pPath) return { page: slug, reason: !pBuilt.ok ? `${parent.create.id}: ${pBuilt.reason}` : `the response of ${parent.create.id} does not show where the new identifier is` };
   const bind: Record<string, string> = { [parent.idParam]: `{{${pVar}}}` };
-  const cBuilt = buildValues(model, checker, child.create, bind);
+  const cBuilt = bindBodyIds(model, checker, ctx.resources, child.create, buildValues(model, checker, child.create, bind), pre, { exclude: [parent, child], available: bind });
   if (!cBuilt.ok) return { page: slug, reason: `${child.create.id}: ${cBuilt.reason}` };
 
   const pOne = singular(parent.noun);
   const cOne = singular(child.noun);
   const d = new Doc();
-  d.add(`This tutorial creates ${article(pOne)}, then adds ${article(cOne)} to it. The identifier from the first call is used in every call that follows.`);
+  d.add(`This tutorial creates ${article(pOne)}, then adds ${article(cOne)} to it. The identifier of the ${pOne} is used in every call that follows.${prerequisiteIntro(pre)}`);
   d.add('<Steps>');
+  prerequisiteSteps(d, ctx, pre);
   step(d, `Create ${article(pOne)}`, parent.create, pBuilt, [pVar, pPath], `The identifier is at ${code(pPath)} in the response.`);
 
   let cVar = idVariable(child);
