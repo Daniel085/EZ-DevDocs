@@ -140,7 +140,8 @@ function opList(ops: Operation[], max = 12): string {
 
 const opIntro = (op: Operation) => {
   const summary = prose(op.summary, 160).replace(/[.\s]+$/, '');
-  const desc = prose(op.description, 320);
+  // A flow step keeps the operation's rules, which specs often put late in the description.
+  const desc = prose(op.description, 1200);
   const same = (x?: string) => plainText(x).toLowerCase().replace(/s\b|[^a-z0-9]/g, '');
   return [`Call ${opLink(op)}${summary ? `: ${summary}.` : '.'}`, desc && same(op.description) !== same(op.summary) ? desc : ''].filter(Boolean).join('\n\n');
 };
@@ -216,8 +217,11 @@ export function authenticationPage(ctx: Ctx): Result {
 // ---------------------------------------------------------------------------------------------
 // Quickstart
 
+const requiresCredentials = (op: Operation) => op.security.length > 0 && op.security.every((r) => Object.keys(r ?? {}).length > 0);
+
 function firstCall(ctx: Ctx): { op: Operation; built: BuiltValues } | undefined {
   let best: { op: Operation; built: BuiltValues; score: number } | undefined;
+  const secured = ctx.model.operations.some(requiresCredentials);
   for (const op of ctx.model.operations) {
     if (op.deprecated || !usableId(op.id)) continue;
     const built = buildValues(ctx.model, ctx.checker, op);
@@ -227,6 +231,8 @@ function firstCall(ctx: Ctx): { op: Operation; built: BuiltValues } | undefined 
     if (op.method === 'get') score += 50;
     else if (op.method === 'delete') score -= 100;
     if (!op.parameters.some((p) => p.in === 'path')) score += 20;
+    // When the API has credentials, the first call should show them being used.
+    if (secured && !requiresCredentials(op)) score -= 40;
     if (!built.placeholder) score += 10;
     if (ok?.schema) score += 10;
     if (ok?.hasExample) score += 5;
@@ -245,7 +251,11 @@ export function quickstartPage(ctx: Ctx): Result {
   d.add('This guide takes you from nothing to a first successful call to {{api_name}}.', plainText(model.description) !== plainText(model.title) && prose(model.description, 400));
   if (model.servers.length === 0) d.gaps.push('The spec lists no servers, so the base URL is unknown.');
 
-  const requirement = (call?.op.security ?? model.operations[0]!.security).find((r) => Object.keys(r ?? {}).length > 0);
+  // The first call's own requirement, or failing that any operation's: an API with credentials
+  // never gets a quickstart that says it has none.
+  const requirementOf = (op: Operation | undefined) => op?.security.find((r) => Object.keys(r ?? {}).length > 0);
+  const requirement = requirementOf(call?.op) ?? requirementOf(model.operations.find((op) => requirementOf(op)));
+  const callIsOpen = !!call && !!requirement && !requirementOf(call.op);
   const schemeName = requirement ? Object.keys(requirement)[0]! : undefined;
   const scheme = schemeName ? model.securitySchemes[schemeName] : undefined;
 
@@ -255,7 +265,7 @@ export function quickstartPage(ctx: Ctx): Result {
     d.add('<Step title="Get your credentials">', `{{api_name}} authenticates requests with ${t.noun}.`, prose(scheme.description, 400));
     d.add('<Callout type="note" title="Where to get credentials">', 'The API description does not say how credentials are issued. Ask the API provider if you do not have them yet.', '</Callout>');
     d.gaps.push('Quickstart step "Get your credentials": the spec does not say how credentials are issued. Replace the callout with real instructions.');
-    d.add('</Step>', '<Step title="Authenticate your requests">', t.how, 'The samples on this page include your credentials for you.');
+    d.add('</Step>', '<Step title="Authenticate your requests">', t.how, callIsOpen ? `${opLink(call!.op)}, the call below, is one of the operations that needs no credentials.` : 'The samples on this page include your credentials for you.');
     if (ctx.has('authentication')) d.add('For the details, see [Authentication](guide:authentication).');
     d.add('</Step>');
   } else if (requirement) {

@@ -128,3 +128,37 @@ test('identifiers in a request body come from records created earlier on the pag
   assert.ok(report.gaps.some((g) => g.page === 'orders/manage' && g.message.includes("'warehouse_id'")));
   assert.deepEqual(report.pages.find((p) => p.page === 'orders/manage')!.operations.slice(0, 3), ['createCustomer', 'createSite', 'createOrder']);
 });
+
+test('long descriptions end on a whole sentence', () => {
+  const t = 'First rule here. ' + 'Second rule goes on for a while. '.repeat(3) + 'A final sentence that is cut.';
+  const out = prose(t, 100);
+  assert.ok(out.length <= 100 && out.endsWith('.') && !out.includes('…'));
+  assert.ok(prose('word '.repeat(50), 40).endsWith('…'), 'no sentence to end on: cut at a word');
+});
+
+test('the quickstart calls an operation that needs credentials when the API has them', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    security: [{ key: [] }],
+    paths: {
+      '/': { get: { operationId: 'index', security: [], responses: { '200': { description: 'ok' } } } },
+      '/me': { get: { operationId: 'whoAmI', summary: 'Who am I', responses: { '200': { description: 'ok' } } } },
+      '/things': {
+        post: {
+          operationId: 'createThing',
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } }, examples: [{ name: 'a' }] } } } },
+          responses: { '201': { description: 'ok' } },
+        },
+      },
+    },
+    components: { securitySchemes: { key: { type: 'http', scheme: 'bearer' } } },
+  };
+  const { files, report } = generate(JSON.stringify(spec), { manifestSchema });
+  const quickstart = text(files.get('pages/quickstart.md')!);
+  assert.match(quickstart, /operation="whoAmI"/);
+  assert.match(quickstart, /Get your credentials/);
+  assert.ok(!report.gaps.some((g) => g.message.includes('declares no authentication')));
+  assert.ok(!report.specIssues.some((i) => i.code === 'no-request-example'), 'an example on the schema counts');
+});

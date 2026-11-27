@@ -18,8 +18,11 @@ export function plainText(input: string | undefined, max = 0): string {
     .replace(/\s+/g, ' ')
     .trim();
   if (max && t.length > max) {
+    // End on a whole sentence when one closes in the second half; otherwise cut at a word.
     const cut = t.slice(0, max - 1);
-    t = cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max / 2))).replace(/[\s,;:.]+$/, '') + '…';
+    const ends = [...t.slice(0, max + 1).matchAll(/[.!?](?=\s)/g)].map((m) => m.index + 1);
+    const sentence = ends.filter((i) => i <= max && i >= max / 2).at(-1);
+    t = sentence ? t.slice(0, sentence) : cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max / 2))).replace(/[\s,;:.]+$/, '') + '…';
   }
   return t;
 }
