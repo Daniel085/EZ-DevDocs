@@ -105,3 +105,70 @@ test('spec text cannot become active syntax', () => {
   assert.equal(attr('&quot; onclick=&quot;x "y" {z}'), "quot; onclick=quot;x 'y' :z");
   assert.equal(meta('A <b>[x](y)</b> ~~c~~ {d}'), 'A x c d');
 });
+
+test('identifiers in a request body come from records created earlier on the page', () => {
+  const { files, report } = generate(readFileSync(join(root, 'fixtures/specs/body-references.yaml')), { manifestSchema });
+  const page = (slug: string) => text(files.get(`pages/${slug}.md`)!);
+
+  const sites = page('sites/manage');
+  assert.match(sites, /<Sample operation="createCustomer" capture="customer_id=\$\.id">/);
+  assert.match(sites, /"customer_id": "\{\{customer_id\}\}"/);
+  assert.ok(sites.indexOf('operation="createCustomer"') < sites.indexOf('operation="createSite"'), 'the customer is created before the site');
+  assert.doesNotMatch(sites, /0199a3c4/, 'no example identifier is left for a record the page creates');
+
+  // A prerequisite's own prerequisite comes first, and each record is created once.
+  const orders = page('orders/manage');
+  const at = (op: string) => orders.indexOf(`operation="${op}"`);
+  assert.ok(at('createCustomer') < at('createSite') && at('createSite') < at('createOrder'));
+  assert.equal(orders.split('operation="createCustomer"').length, 2);
+  assert.match(orders, /"site_id": "\{\{site_id\}\}"/);
+
+  // Nothing in the spec creates a warehouse: the example stays and the report says so.
+  assert.match(orders, /"warehouse_id": "0199a3c4-5d6e-7f80-9a1b-2c3d4e5f6a7d"/);
+  assert.ok(report.gaps.some((g) => g.page === 'orders/manage' && g.message.includes("'warehouse_id'")));
+  assert.deepEqual(report.pages.find((p) => p.page === 'orders/manage')!.operations.slice(0, 3), ['createCustomer', 'createSite', 'createOrder']);
+});
+
+test('long descriptions end on a whole sentence', () => {
+  const t = 'First rule here. ' + 'Second rule goes on for a while. '.repeat(3) + 'A final sentence that is cut.';
+  const out = prose(t, 100);
+  assert.ok(out.length <= 100 && out.endsWith('. …'), 'ends on a sentence, and the cut is marked');
+  assert.ok(prose('word '.repeat(50), 40).endsWith('…'), 'no sentence to end on: cut at a word');
+});
+
+test('the quickstart calls an operation that needs credentials when the API has them', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    security: [{ key: [] }],
+    paths: {
+      '/': { get: { operationId: 'index', security: [], responses: { '200': { description: 'ok' } } } },
+      '/me': { get: { operationId: 'whoAmI', summary: 'Who am I', responses: { '200': { description: 'ok' } } } },
+      '/things': {
+        post: {
+          operationId: 'createThing',
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } }, examples: [{ name: 'a' }] } } } },
+          responses: { '201': { description: 'ok' } },
+        },
+      },
+    },
+    components: { securitySchemes: { key: { type: 'http', scheme: 'bearer' } } },
+  };
+  const { files, report } = generate(JSON.stringify(spec), { manifestSchema });
+  const quickstart = text(files.get('pages/quickstart.md')!);
+  assert.match(quickstart, /operation="whoAmI"/);
+  assert.match(quickstart, /Get your credentials/);
+  assert.ok(!report.gaps.some((g) => g.message.includes('declares no authentication')));
+  assert.ok(!report.specIssues.some((i) => i.code === 'no-request-example'), 'an example on the schema counts');
+});
+
+test('an idempotency key in the request body is generated and gets its page', () => {
+  const { files, report } = generate(readFileSync(join(root, 'fixtures/specs/body-references.yaml')), { manifestSchema });
+  assert.match(text(files.get('pages/orders/manage.md')!), /"idempotency_key": "\{\{idempotency_key\}\}"/);
+  const page = text(files.get('pages/idempotency.md')!);
+  assert.match(page, /accepts `idempotency_key` in the request body/);
+  assert.match(page, /A repeat with the same key answers with what the first one did/);
+  assert.match(page, /<Sample operation="createOrder">/);
+  assert.deepEqual(report.validation.errors, []);
+});

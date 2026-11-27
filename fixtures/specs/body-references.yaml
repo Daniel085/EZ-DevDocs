@@ -1,0 +1,159 @@
+openapi: 3.1.0
+info:
+  title: Body references
+  version: 1.0.0
+  description: Resources that refer to each other by identifiers in request bodies, not in paths.
+servers:
+  - url: https://api.example.test
+security:
+  - key: []
+paths:
+  /customers:
+    post:
+      operationId: createCustomer
+      summary: Add a customer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: Pat Lee }
+      responses:
+        '201':
+          description: The customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+  /customers/{customer_id}:
+    get:
+      operationId: getCustomer
+      summary: Get a customer
+      parameters:
+        - { name: customer_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The customer.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Customer' }
+  /sites:
+    post:
+      operationId: createSite
+      summary: Add a site
+      description: Records a place a customer takes delivery.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, street]
+              properties:
+                customer_id: { type: string, format: uuid }
+                street: { type: string }
+              examples:
+                - customer_id: 0199a3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                  street: 12 Lakeview Rd
+      responses:
+        '201':
+          description: The site.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+  /sites/{site_id}:
+    get:
+      operationId: getSite
+      summary: Get a site
+      parameters:
+        - { name: site_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The site.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+  /orders:
+    post:
+      operationId: createOrder
+      summary: Write up an order
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [customer_id, site_id, warehouse_id, lines]
+              properties:
+                customer_id: { type: string, format: uuid }
+                site_id: { type: string, format: uuid }
+                warehouse_id: { type: string, format: uuid }
+                idempotency_key:
+                  type: string
+                  pattern: '^[A-Za-z0-9._:-]{8,200}$'
+                  description: A key you make up for this request. A repeat with the same key answers with what the first one did.
+                lines:
+                  type: array
+                  items:
+                    type: object
+                    required: [sku]
+                    properties:
+                      sku: { type: string }
+              examples:
+                - customer_id: 0199a3c4-5d6e-7f80-9a1b-2c3d4e5f6a7b
+                  site_id: 0199a3c4-5d6e-7f80-9a1b-2c3d4e5f6a7c
+                  warehouse_id: 0199a3c4-5d6e-7f80-9a1b-2c3d4e5f6a7d
+                  lines: [{ sku: TUB-1 }]
+      responses:
+        '201':
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+  /orders/{order_id}:
+    get:
+      operationId: getOrder
+      summary: Get an order
+      parameters:
+        - { name: order_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Order' }
+  /warehouses/{warehouse_id}:
+    get:
+      operationId: getWarehouse
+      summary: Get a warehouse
+      parameters:
+        - { name: warehouse_id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The warehouse.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+components:
+  securitySchemes:
+    key: { type: http, scheme: bearer }
+  schemas:
+    Customer:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    Site:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        customer_id: { type: string, format: uuid }
+    Order:
+      type: object
+      properties:
+        id: { type: string, format: uuid }

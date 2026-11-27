@@ -2,6 +2,7 @@
 // Nothing here writes API request code: calls are always <Sample> components.
 
 import {
+  bindBodyIds,
   buildValues,
   findErrors,
   findIdempotency,
@@ -10,11 +11,16 @@ import {
   firstIdPathInList,
   idPathInResponse,
   idVariable,
+  newPrereqState,
   type BuiltValues,
+  type Prerequisite,
+  type PrereqState,
   type Resource,
 } from './analyze.ts';
 import { deref, schemaRefName, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
-import { attr, capitalize, code, frontmatter, meta, plainText, prose } from './text.ts';
+import { attr, capitalize, code, frontmatter, meta, plainText, prose, singular } from './text.ts';
+
+export { singular };
 import type { SchemaChecker } from './values.ts';
 
 export type PageType = 'quickstart' | 'concept' | 'how-to' | 'tutorial';
@@ -58,15 +64,6 @@ const usableSchema = (name: string) => /^[A-Za-z0-9_.\-]+$/.test(name);
 const opLink = (op: Operation) => (usableId(op.id) ? `[${code(op.id)}](op:${op.id})` : code(op.id));
 const schemaLink = (name: string) => (usableSchema(name) ? `[${code(name)}](schema:${name})` : code(name));
 const article = (noun: string) => (/^[aeiou]/i.test(noun) ? `an ${noun}` : `a ${noun}`);
-
-export function singular(noun: string): string {
-  const parts = noun.split(' ');
-  let w = parts.pop()!;
-  if (/ies$/.test(w)) w = w.slice(0, -3) + 'y';
-  else if (/(ss|x|ch|sh)es$/.test(w)) w = w.slice(0, -2);
-  else if (/s$/.test(w) && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
-  return [...parts, w].join(' ');
-}
 
 class Doc {
   lines: string[] = [];
@@ -143,7 +140,10 @@ function opList(ops: Operation[], max = 12): string {
 
 const opIntro = (op: Operation) => {
   const summary = prose(op.summary, 160).replace(/[.\s]+$/, '');
-  const desc = prose(op.description, 320);
+  // A flow step keeps the operation's rules, which specs often put late in the description.
+  let desc = prose(op.description, 1200);
+  // Say so when the description was shortened, and point at the reference, which has all of it.
+  if (desc.endsWith(' …')) desc = desc.slice(0, -2) + (usableId(op.id) ? ` The reference for ${opLink(op)} has the rest of this description.` : ' The reference has the rest of this description.');
   const same = (x?: string) => plainText(x).toLowerCase().replace(/s\b|[^a-z0-9]/g, '');
   return [`Call ${opLink(op)}${summary ? `: ${summary}.` : '.'}`, desc && same(op.description) !== same(op.summary) ? desc : ''].filter(Boolean).join('\n\n');
 };
@@ -219,8 +219,11 @@ export function authenticationPage(ctx: Ctx): Result {
 // ---------------------------------------------------------------------------------------------
 // Quickstart
 
+const requiresCredentials = (op: Operation) => op.security.length > 0 && op.security.every((r) => Object.keys(r ?? {}).length > 0);
+
 function firstCall(ctx: Ctx): { op: Operation; built: BuiltValues } | undefined {
   let best: { op: Operation; built: BuiltValues; score: number } | undefined;
+  const secured = ctx.model.operations.some(requiresCredentials);
   for (const op of ctx.model.operations) {
     if (op.deprecated || !usableId(op.id)) continue;
     const built = buildValues(ctx.model, ctx.checker, op);
@@ -230,6 +233,8 @@ function firstCall(ctx: Ctx): { op: Operation; built: BuiltValues } | undefined 
     if (op.method === 'get') score += 50;
     else if (op.method === 'delete') score -= 100;
     if (!op.parameters.some((p) => p.in === 'path')) score += 20;
+    // When the API has credentials, the first call should show them being used.
+    if (secured && !requiresCredentials(op)) score -= 40;
     if (!built.placeholder) score += 10;
     if (ok?.schema) score += 10;
     if (ok?.hasExample) score += 5;
@@ -248,7 +253,11 @@ export function quickstartPage(ctx: Ctx): Result {
   d.add('This guide takes you from nothing to a first successful call to {{api_name}}.', plainText(model.description) !== plainText(model.title) && prose(model.description, 400));
   if (model.servers.length === 0) d.gaps.push('The spec lists no servers, so the base URL is unknown.');
 
-  const requirement = (call?.op.security ?? model.operations[0]!.security).find((r) => Object.keys(r ?? {}).length > 0);
+  // The first call's own requirement, or failing that any operation's: an API with credentials
+  // never gets a quickstart that says it has none.
+  const requirementOf = (op: Operation | undefined) => op?.security.find((r) => Object.keys(r ?? {}).length > 0);
+  const requirement = requirementOf(call?.op) ?? requirementOf(model.operations.find((op) => requirementOf(op)));
+  const callIsOpen = !!call && !!requirement && !requirementOf(call.op);
   const schemeName = requirement ? Object.keys(requirement)[0]! : undefined;
   const scheme = schemeName ? model.securitySchemes[schemeName] : undefined;
 
@@ -258,7 +267,7 @@ export function quickstartPage(ctx: Ctx): Result {
     d.add('<Step title="Get your credentials">', `{{api_name}} authenticates requests with ${t.noun}.`, prose(scheme.description, 400));
     d.add('<Callout type="note" title="Where to get credentials">', 'The API description does not say how credentials are issued. Ask the API provider if you do not have them yet.', '</Callout>');
     d.gaps.push('Quickstart step "Get your credentials": the spec does not say how credentials are issued. Replace the callout with real instructions.');
-    d.add('</Step>', '<Step title="Authenticate your requests">', t.how, 'The samples on this page include your credentials for you.');
+    d.add('</Step>', '<Step title="Authenticate your requests">', t.how, callIsOpen ? `${opLink(call!.op)}, the call below, is one of the operations that needs no credentials.` : 'The samples on this page include your credentials for you.');
     if (ctx.has('authentication')) d.add('For the details, see [Authentication](guide:authentication).');
     d.add('</Step>');
   } else if (requirement) {
@@ -359,19 +368,20 @@ export function paginationPage(ctx: Ctx): Result {
 export function idempotencyPage(ctx: Ctx): Result {
   const { model, checker } = ctx;
   const info = findIdempotency(model);
-  if (!info) return { page: 'idempotency', reason: 'no operation takes an idempotency header' };
+  if (!info) return { page: 'idempotency', reason: 'no operation takes an idempotency key in a header or in its request body' };
   const d = new Doc();
-  d.add(`${info.operations.length === 1 ? 'One operation in {{api_name}} accepts' : `${info.operations.length} operations in {{api_name}} accept`} the ${code(info.header)} header.`, prose(info.description, 600));
-  if (!info.description) d.gaps.push(`The spec does not describe the '${info.header}' header. Explain what the API does with a repeated key.`);
+  const place = info.where === 'header' ? `the ${code(info.name)} header` : `${code(info.name)} in the request body`;
+  d.add(`${info.operations.length === 1 ? 'One operation in {{api_name}} accepts' : `${info.operations.length} operations in {{api_name}} accept`} ${place}.`, prose(info.description, 600));
+  if (!info.description) d.gaps.push(`The spec does not describe '${info.name}'. Explain what the API does with a repeated key.`);
   for (const op of info.operations) {
     if (!usableId(op.id)) continue;
     const built = buildValues(model, checker, op);
-    if (!built.ok) continue;
+    if (!built.ok || !JSON.stringify(built.values).includes('{{idempotency_key}}')) continue;
     d.add('## Example', `${opLink(op)} with a generated key:`);
     d.sample(op, built);
     break;
   }
-  d.add('## Operations that accept the header', opList(info.operations));
+  d.add('## Operations that accept a key', opList(info.operations));
   for (const op of info.operations.slice(0, 12)) if (usableId(op.id)) d.operations.add(op.id);
   return d.finish('idempotency', 'concept', 'Idempotency', `Which operations in ${meta(model.title, 120)} accept an idempotency key.`);
 }
@@ -416,6 +426,30 @@ function step(d: Doc, title: string, op: Operation, built: BuiltValues, capture?
   d.add(after, '</Step>');
 }
 
+/** Steps that create the records a later request body refers to by identifier. */
+function prerequisiteSteps(d: Doc, ctx: Ctx, pre: PrereqState): void {
+  for (const p of pre.steps) {
+    const one = singular(p.resource.noun);
+    const summary = prose(p.op.summary, 160).replace(/[.\s]+$/, '');
+    d.add(`<Step title="${attr(`Create ${article(one)} to refer to`)}">`);
+    d.add(`The request body of ${opLink(p.neededBy)} refers to ${article(one)} by ${code(p.field)}, so this guide creates one first.`, `Call ${opLink(p.op)}${summary ? `: ${summary}.` : '.'}`);
+    d.sample(p.op, p.built, { capture: [p.variable, p.idPath] });
+    d.add(`The identifier is at ${code(p.idPath)} in the response. Later steps send it as ${code(p.field)}.`);
+    const guide = `${p.resource.slug}/manage`;
+    if (ctx.has(guide)) d.add(`For more on ${p.resource.noun}, see [${capitalize(p.resource.noun)}](guide:${guide}).`);
+    d.add('</Step>');
+  }
+  if (pre.unresolved.size) {
+    d.gaps.push(`Samples send example values for ${[...pre.unresolved].sort().map((f) => `'${f}'`).join(', ')}, which no earlier step produces. Say where a reader gets them.`);
+  }
+}
+
+const prerequisiteIntro = (pre: PrereqState) => {
+  const nouns = [...new Set(pre.steps.map((p) => article(singular(p.resource.noun))))];
+  if (!nouns.length) return '';
+  return ` Before that, it creates ${nouns.length > 1 ? `${nouns.slice(0, -1).join(', ')} and ${nouns.at(-1)}` : nouns[0]}, which the requests refer to by identifier.`;
+};
+
 export function resourcePage(ctx: Ctx, r: Resource): Result {
   const { model, checker } = ctx;
   const one = singular(r.noun);
@@ -459,6 +493,11 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
     if (b.ok) follow.push([`List ${r.noun}`, r.list, b]);
   }
   tryAdd(`Delete the ${one}`, r.remove);
+  // Identifiers in request bodies: the resource's own comes from the first call, others from
+  // records created beforehand.
+  const pre = newPrereqState([variable]);
+  if (source === 'create') first = bindBodyIds(model, checker, ctx.resources, r.create!, first, pre, { exclude: [r] });
+  for (const f of follow) f[2] = bindBodyIds(model, checker, ctx.resources, f[1], f[2], pre, { exclude: [r], available: { [r.idParam]: `{{${variable}}}` } });
   const slug = source === 'create' ? manage : `${r.slug}/browse`;
   if (follow.filter(([, op]) => op !== r.list).length === 0) return { page: slug, reason: `only one usable operation on ${r.noun}${notes.length ? ` (${notes.join(' ')})` : ''}; a guide would restate the reference` };
 
@@ -467,9 +506,10 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
   const verbs = follow.map(([, op]) => (op === r.get ? 'retrieve' : op === r.update ? 'update' : op === r.remove ? 'delete' : 'list'));
   const list = verbs.length > 1 ? `${verbs.slice(0, -1).join(', ')} and ${verbs.at(-1)}` : verbs[0]!;
   const firstOp = source === 'create' ? r.create! : r.list!;
-  if (source === 'create') d.add(`This guide creates ${article(one)}, then uses its identifier to ${list} it. Each step carries the identifier forward from the first call.`);
-  else d.add(`This guide lists ${r.noun}, takes the identifier of the first one, and uses it to ${list} it.`);
+  if (source === 'create') d.add(`This guide creates ${article(one)}, then uses its identifier to ${list} it. Each step carries the identifier forward from the call that creates it.${prerequisiteIntro(pre)}`);
+  else d.add(`This guide lists ${r.noun}, takes the identifier of the first one, and uses it to ${list} it.${prerequisiteIntro(pre)}`);
   d.add('<Steps>');
+  prerequisiteSteps(d, ctx, pre);
   d.add(`<Step title="${attr(source === 'create' ? `Create ${article(one)}` : `List ${r.noun}`)}">`, opIntro(firstOp));
   d.sample(firstOp, first, { capture: [variable, path] });
   d.response(model, firstOp);
@@ -489,18 +529,20 @@ export function nestedTutorial(ctx: Ctx, parent: Resource, child: Resource): Res
   const ok = (op: Operation | undefined): op is Operation => !!op && usableId(op.id);
   if (!ok(parent.create) || !parent.idParam || !ok(child.create)) return { page: slug, reason: 'parent or child has no create operation' };
   const pVar = idVariable(parent);
-  const pBuilt = buildValues(model, checker, parent.create);
+  const pre = newPrereqState([pVar]);
+  const pBuilt = bindBodyIds(model, checker, ctx.resources, parent.create, buildValues(model, checker, parent.create), pre, { exclude: [parent, child] });
   const pPath = idPathInResponse(model, parent.create, parent.idParam);
   if (!pBuilt.ok || !pPath) return { page: slug, reason: !pBuilt.ok ? `${parent.create.id}: ${pBuilt.reason}` : `the response of ${parent.create.id} does not show where the new identifier is` };
   const bind: Record<string, string> = { [parent.idParam]: `{{${pVar}}}` };
-  const cBuilt = buildValues(model, checker, child.create, bind);
+  const cBuilt = bindBodyIds(model, checker, ctx.resources, child.create, buildValues(model, checker, child.create, bind), pre, { exclude: [parent, child], available: bind });
   if (!cBuilt.ok) return { page: slug, reason: `${child.create.id}: ${cBuilt.reason}` };
 
   const pOne = singular(parent.noun);
   const cOne = singular(child.noun);
   const d = new Doc();
-  d.add(`This tutorial creates ${article(pOne)}, then adds ${article(cOne)} to it. The identifier from the first call is used in every call that follows.`);
+  d.add(`This tutorial creates ${article(pOne)}, then adds ${article(cOne)} to it. The identifier of the ${pOne} is used in every call that follows.${prerequisiteIntro(pre)}`);
   d.add('<Steps>');
+  prerequisiteSteps(d, ctx, pre);
   step(d, `Create ${article(pOne)}`, parent.create, pBuilt, [pVar, pPath], `The identifier is at ${code(pPath)} in the response.`);
 
   let cVar = idVariable(child);

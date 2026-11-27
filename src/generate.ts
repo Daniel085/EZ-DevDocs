@@ -18,7 +18,7 @@ import {
   type Result,
   type Skipped,
 } from './pages.ts';
-import { loadSpec, type Json, type SpecIssue } from './spec.ts';
+import { deref, loadSpec, type Json, type SpecIssue } from './spec.ts';
 import { CONTRACT_VERSION, validateBundle, type BundleFiles, type Finding, type ValidationReport } from './validate.ts';
 import { SchemaChecker } from './values.ts';
 
@@ -125,7 +125,11 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
 
   const issues = new Map<string, SpecIssue[]>();
   for (const i of model.issues) issues.set(i.code, [...(issues.get(i.code) ?? []), i]);
-  const noExamples = model.operations.filter((op) => op.requestBody && !op.requestBody.example && Object.keys(op.requestBody.examples).length === 0);
+  const schemaExample = (schema: Json) => {
+    const sc = deref(model.doc, schema);
+    return sc?.example !== undefined || (Array.isArray(sc?.examples) && sc.examples.length > 0);
+  };
+  const noExamples = model.operations.filter((op) => op.requestBody && op.requestBody.example === undefined && Object.keys(op.requestBody.examples).length === 0 && !schemaExample(op.requestBody.schema));
   if (noExamples.length) issues.set('no-request-example', noExamples.map((op) => ({ code: 'no-request-example', message: `${op.id} has a request body with no example.` })));
   const noSummary = model.operations.filter((op) => !op.summary && !op.description);
   if (noSummary.length) issues.set('no-description', noSummary.map((op) => ({ code: 'no-description', message: `${op.id} has no summary or description.` })));

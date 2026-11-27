@@ -3,7 +3,7 @@
 
 import { deref, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
 import { objectProperties, synthesize, validateSampleValues, type SampleValues, type SchemaChecker } from './values.ts';
-import { plural, slugify, words } from './text.ts';
+import { plural, singular, slugify, words } from './text.ts';
 
 export interface Resource {
   collectionPath: string;
@@ -163,6 +163,15 @@ export function buildValues(model: SpecModel, checker: SchemaChecker, op: Operat
     if (!good) return fail(candidates.length ? 'no example or generated request body passes the request schema' : 'could not build a request body from the schema');
     values.body = good.value;
     placeholder ||= good.placeholder;
+    // A key in the body is generated for the reader, as one in a header is.
+    const keyField = idempotencyBodyField(model, op);
+    if (keyField && values.body && typeof values.body === 'object' && !Array.isArray(values.body)) {
+      const withKey = { ...values.body, [keyField]: '{{idempotency_key}}' };
+      if (validateSampleValues(op, { ...values, body: withKey }, checker).length === 0) {
+        values.body = withKey;
+        good.name = undefined;
+      }
+    }
     if (good.name && /^[A-Za-z0-9_.\-]+$/.test(good.name) && !values.path && !values.query && !values.headers) exampleName = good.name;
   }
 
@@ -239,6 +248,129 @@ export function idVariable(resource: Resource): string {
     name = `${noun.length > 3 ? noun.replace(/s$/, '') : noun}_id`;
   } else if (!/(^|_)id$/.test(name)) name += '_id';
   return /^[a-z]/.test(name) ? name : `r_${name}`;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Identifiers in request bodies
+
+/** A record that must exist before a call, because the call's body refers to it by identifier. */
+export interface Prerequisite {
+  resource: Resource;
+  /** The operation that creates the record. */
+  op: Operation;
+  built: BuiltValues;
+  variable: string;
+  /** JSONPath of the identifier in the response of `op`. */
+  idPath: string;
+  /** The body field that refers to the record, for example `customer_id`. */
+  field: string;
+  neededBy: Operation;
+}
+
+export interface PrereqState {
+  /** In the order the calls must be made. */
+  steps: Prerequisite[];
+  /** Identifier fields left with an example value, because nothing in the spec creates them. */
+  unresolved: Set<string>;
+  /** Normalized field name to the variable reference that replaces it. */
+  vars: Map<string, string>;
+  /** Variable names already in use on the page. */
+  reserved: Set<string>;
+}
+
+export const newPrereqState = (reserved: string[] = []): PrereqState => ({
+  steps: [],
+  unresolved: new Set(),
+  vars: new Map(),
+  reserved: new Set(['base_url', 'api_key', 'idempotency_key', 'api_name', ...reserved]),
+});
+
+const snake = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+const MAX_PREREQ_STEPS = 5;
+const MAX_PREREQ_DEPTH = 2;
+
+/**
+ * The top-level resource a body field such as `customer_id` names: one whose item path takes a
+ * parameter of the same name and which can be created. When several qualify, the one whose noun
+ * matches the field wins; otherwise the field is left alone rather than guessed.
+ */
+function creatorOf(resources: Resource[], key: string, exclude: Set<Resource>): Resource | undefined {
+  const cands = resources.filter((r) => r.parentParams.length === 0 && r.itemPath && r.idParam && snake(r.idParam) === key && r.create && /^[A-Za-z0-9_.\-/:~@$]+$/.test(r.create.id));
+  if (cands.some((r) => exclude.has(r))) return undefined;
+  const stem = key.replace(/_id$/, '');
+  const named = cands.filter((r) => singular(r.noun).replace(/[^a-z0-9]+/g, '_') === stem);
+  return named[0] ?? (cands.length === 1 ? cands[0] : undefined);
+}
+
+/**
+ * Replaces example identifiers in a request body with variables. An identifier in `available` is
+ * already known on the page. Any other is matched to a resource the spec can create; that create
+ * call is added to `state.steps`, after whatever its own body needs. Fields that match nothing
+ * keep their example value and are recorded as unresolved.
+ */
+export function bindBodyIds(
+  model: SpecModel,
+  checker: SchemaChecker,
+  resources: Resource[],
+  op: Operation,
+  built: BuiltValues,
+  state: PrereqState,
+  opts: { exclude?: Resource[]; available?: Record<string, string>; depth?: number } = {},
+): BuiltValues {
+  const body = built.values.body;
+  if (!built.ok || !body || typeof body !== 'object') return built;
+  const exclude = new Set(opts.exclude ?? []);
+  const depth = opts.depth ?? 0;
+  const available = new Map(Object.entries(opts.available ?? {}).map(([k, v]) => [snake(k), v]));
+  const saved = { steps: state.steps.length, vars: new Map(state.vars), unresolved: new Set(state.unresolved), reserved: new Set(state.reserved) };
+
+  const resolve = (key: string): string | undefined => {
+    if (available.has(key)) return available.get(key);
+    if (state.vars.has(key)) return state.vars.get(key);
+    const r = creatorOf(resources, key, exclude);
+    if (!r || depth >= MAX_PREREQ_DEPTH || state.steps.length >= MAX_PREREQ_STEPS) return undefined;
+    const variable = idVariable(r);
+    const idPath = idPathInResponse(model, r.create!, r.idParam!);
+    let made = buildValues(model, checker, r.create!);
+    if (!made.ok || !idPath || state.reserved.has(variable)) return undefined;
+    made = bindBodyIds(model, checker, resources, r.create!, made, state, { exclude: [...exclude, r], depth: depth + 1 });
+    state.reserved.add(variable);
+    state.vars.set(key, `{{${variable}}}`);
+    state.steps.push({ resource: r, op: r.create!, built: made, variable, idPath, field: key, neededBy: op });
+    return state.vars.get(key);
+  };
+
+  let changed = false;
+  const missing: string[] = [];
+  const walk = (node: Json): Json => {
+    if (Array.isArray(node)) return node.map(walk);
+    if (!node || typeof node !== 'object') return node;
+    const out: Json = {};
+    for (const [k, v] of Object.entries(node)) {
+      if (typeof v === 'string' && v !== '' && !v.includes('{{') && /_id$/.test(snake(k))) {
+        const ref = resolve(snake(k));
+        if (ref) changed = true;
+        else missing.push(k);
+        out[k] = ref ?? v;
+      } else out[k] = walk(v);
+    }
+    return out;
+  };
+  const bound = walk(body);
+  // Only a field that names a path parameter somewhere in the spec is known to identify a record.
+  const known = new Set(model.operations.flatMap((o) => o.parameters.filter((x) => x.in === 'path').map((x) => snake(x.name))));
+  for (const k of missing) if (known.has(snake(k))) state.unresolved.add(k);
+  if (!changed) return built;
+  if (validateSampleValues(op, { ...built.values, body: bound }, checker).length) {
+    // The body does not validate with variables in it: keep the examples and take back the steps.
+    state.steps.length = saved.steps;
+    state.vars = saved.vars;
+    state.reserved = saved.reserved;
+    state.unresolved = saved.unresolved;
+    for (const k of missing) if (known.has(snake(k))) state.unresolved.add(k);
+    return built;
+  }
+  return { ...built, values: { ...built.values, body: bound }, exampleName: undefined };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -365,16 +497,36 @@ export function findRateLimits(model: SpecModel): RateLimitInfo | undefined {
   return operations.length ? { operations, description, headers } : undefined;
 }
 
-export function findIdempotency(model: SpecModel): { header: string; description?: string; operations: Operation[] } | undefined {
-  const operations: Operation[] = [];
-  let header: string | undefined;
-  let description: string | undefined;
+/** The top-level request body property that carries an idempotency key, if the body has one. */
+export function idempotencyBodyField(model: SpecModel, op: Operation): string | undefined {
+  const rb = op.requestBody;
+  if (!rb?.schema || !/json|x-www-form-urlencoded/i.test(rb.contentType)) return undefined;
+  return Object.keys(objectProperties(model.doc, rb.schema)).find((k) => /idempotency/i.test(k) && isScalar(model.doc, objectProperties(model.doc, rb.schema)[k]));
+}
+
+export interface IdempotencyInfo {
+  /** Where the key goes in most operations that take one. */
+  where: 'header' | 'body';
+  /** The header or body field name. */
+  name: string;
+  description?: string;
+  operations: Operation[];
+}
+
+export function findIdempotency(model: SpecModel): IdempotencyInfo | undefined {
+  const found = { header: [] as [Operation, string, string | undefined][], body: [] as [Operation, string, string | undefined][] };
   for (const op of model.operations) {
+    if (op.deprecated) continue;
     const p = op.parameters.find((x) => x.in === 'header' && /idempotency/i.test(x.name));
-    if (!p) continue;
-    header ??= p.name;
-    description ??= p.description;
-    operations.push(op);
+    if (p) {
+      found.header.push([op, p.name, p.description]);
+      continue;
+    }
+    const field = idempotencyBodyField(model, op);
+    if (field) found.body.push([op, field, deref(model.doc, objectProperties(model.doc, op.requestBody!.schema)[field])?.description]);
   }
-  return header ? { header, description, operations } : undefined;
+  const where = found.header.length >= found.body.length ? 'header' : 'body';
+  const list = found[where];
+  if (list.length === 0) return undefined;
+  return { where, name: list[0]![1], description: list.find(([, , d]) => d)?.[2], operations: list.map(([op]) => op) };
 }

@@ -18,8 +18,12 @@ export function plainText(input: string | undefined, max = 0): string {
     .replace(/\s+/g, ' ')
     .trim();
   if (max && t.length > max) {
+    // End on a whole sentence when one closes in the second half; otherwise cut at a word.
+    // Either way the cut is marked.
     const cut = t.slice(0, max - 1);
-    t = cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max / 2))).replace(/[\s,;:.]+$/, '') + '…';
+    const ends = [...t.slice(0, max + 1).matchAll(/[.!?](?=\s)/g)].map((m) => m.index + 1);
+    const sentence = ends.filter((i) => i <= max - 2 && i >= max / 2).at(-1);
+    t = sentence ? t.slice(0, Math.min(sentence, max - 2)) + ' …' : cut.slice(0, Math.max(cut.lastIndexOf(' '), Math.floor(max / 2))).replace(/[\s,;:.]+$/, '') + '…';
   }
   return t;
 }
@@ -76,6 +80,15 @@ export function plural(noun: string): string {
   if (/[^aeiou]y$/.test(noun)) return noun.slice(0, -1) + 'ies';
   if (/(x|ch|sh)$/.test(noun)) return noun + 'es';
   return noun + 's';
+}
+
+export function singular(noun: string): string {
+  const parts = noun.split(' ');
+  let w = parts.pop()!;
+  if (/ies$/.test(w)) w = w.slice(0, -3) + 'y';
+  else if (/(ss|x|ch|sh)es$/.test(w)) w = w.slice(0, -2);
+  else if (/s$/.test(w) && !/(ss|us|is)$/.test(w)) w = w.slice(0, -1);
+  return [...parts, w].join(' ');
 }
 
 export const capitalize = (s: string): string => (s ? s[0]!.toUpperCase() + s.slice(1) : s);
