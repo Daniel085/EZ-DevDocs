@@ -5,7 +5,7 @@ how-to guides and tutorials. It renders nothing. Its only output is a **guides b
 of Markdown files and a JSON manifest, which [EZ-DevPortal](https://github.com/daniel085/ez-devportal)
 ingests and displays next to the API reference.
 
-The bundle format is the portal's guides contract, v0.1. A copy is in [`contract/`](./contract).
+The bundle format is the portal's guides contract, v0.2. A copy is in [`contract/`](./contract).
 What the contract could not express, and the assumptions made where it is silent, are recorded in
 the portal repository; [`docs/contract-feedback.md`](./docs/contract-feedback.md) links to them.
 
@@ -19,16 +19,45 @@ node src/cli.ts generate path/to/openapi.yaml --out out
 node src/cli.ts validate out/guides --spec path/to/openapi.yaml
 ```
 
-`generate` writes `out/guides/` (the bundle), `out/report.json` and `out/spec-audit.md`, and prints a summary. It exits 0
-when the bundle passes contract validation, 1 when it does not, and 2 when the input is unusable.
-`--no-timestamp` leaves `generatedAt` out of the manifest, which makes the output byte-identical
-from run to run.
+`generate` writes the bundle to `out/guides/`, with its `report.json`, and `out/spec-audit.md` beside
+it, and prints a summary. It exits 0 when the bundle passes contract validation, 1 when it does
+not, and 2 when the input is unusable.
+
+The spec is read as bytes and is expected to be the **published spec**: the document the portal
+publishes, with any accepted spec-doctor fixes applied. Its SHA-256 goes in the manifest unchanged.
+The module reads nothing else, uses no network, and puts no clock or randomness in its output: the
+same inputs give byte-identical files. `--timestamp` adds `generatedAt` to the manifest for a run by
+hand.
+
+### Regenerating over a bundle people have edited
+
+```bash
+node src/cli.ts generate path/to/openapi.yaml --out out --existing path/to/current/bundle
+```
+
+`--existing` is the bundle as it stands where people edit it. A regeneration never reverts their work:
+
+- **How an edit is recognised.** `report.json` records the SHA-256 of every page the module wrote.
+  A page in the existing bundle whose bytes do not match its record was edited by a person. A page
+  with no record was added by one.
+- **An edited or added page is emitted byte for byte as given.** Nothing is merged into it. The
+  report lists it with `kept: "edited"`.
+- **A page nobody edited is regenerated**, or removed when the spec no longer supports it.
+- **An edited page that no longer fits the spec is still kept**, for example one that names a
+  removed operation. The report says so under `gaps`, and validation fails on that page until a
+  person fixes it; the module does not hide the error by dropping their text.
+- **Navigation.** If `nav` differs from what the module last wrote, it is the person's: their order,
+  groups and labels stand, entries for pages that are gone are removed, and new pages are added to
+  the group for their type. Otherwise the module orders it.
+- **Assets** in the existing bundle are carried over unchanged.
+- **With no `report.json` in the existing bundle**, nothing can be told apart, so every existing
+  page is kept. Leave `--existing` out to generate in full.
 
 As a library, with no file access:
 
 ```ts
 import { generate } from 'ez-devdocs';
-const { files, manifest, report, auditMarkdown } = generate(specBytes, { manifestSchema });
+const { files, manifest, report, validation, auditMarkdown } = generate(specBytes, { manifestSchema, reportSchema, existing });
 ```
 
 ## What it produces
@@ -67,15 +96,16 @@ nothing keeps its example value and is listed as a gap in the report.
 - **Spec text is untrusted.** Descriptions are reduced to plain text and escaped. HTML, links and
   braces in a description never reach a page as active syntax.
 - **Deterministic.** Slugs, navigation and page content depend only on the spec.
-- **Checked before it leaves.** The bundle is validated against the contract. A page that fails is
-  withheld and reported, and the rest of the bundle is rebuilt without links to it.
+- **Checked before it leaves.** The bundle is validated against the contract. A generated page that
+  fails is left out and reported, and the rest of the bundle is rebuilt without links to it. The
+  module never writes a `<Todo>` or a `draft` page, so it never causes a page to be withheld.
 
 ## Weak specs
 
 | Problem | Behavior |
 |---|---|
-| No `operationId` | Derived as the portal does: method, then the path with every non-alphanumeric character as `_`. Reported. |
-| Duplicate `operationId` | The first is kept. Later ones are ignored and reported. |
+| No `operationId` | Derived by the contract's rule (section 1.1): method, then the path with every character outside `A-Z a-z 0-9` as `_`, with `_2`, `_3` on a collision. Reported. |
+| Duplicate `operationId` | One operation keeps it; each other gets a derived id, by the contract's rule (section 1.1). Reported. |
 | No examples | Values are built from schemas. Pages that use made-up values are flagged `placeholderValues` in the report. |
 | Path parameter with no example and no earlier call that yields it | The guide is skipped, with the reason. An identifier is never guessed. |
 | No documented errors, security, pagination | The page is skipped, with the reason. |
@@ -90,20 +120,23 @@ The assembled document belongs to the API's owner and is not kept in this reposi
 
 ## The report
 
-`report.json` lists, per run: the pages produced and their operations, everything skipped and why,
-the gaps a person should complete, problems found in the spec, and the contract validation result.
+`report.json` is part of the bundle, in the shape the contract gives it (section 5.2): `pages`, each
+written or skipped with the reason; `gaps`, what a person should complete; and `specProblems`. The
+module's own detail rides along as extra members, which the contract allows: each written page's
+type, title, operations and SHA-256, and for each spec problem its code, severity, counts, fix and
+up to 200 affected operations.
 
 ## The spec audit
 
 Every run also audits the spec and writes `spec-audit.md` for whoever owns it: what to change in
-the API description so that better guides can be generated. The same findings are in `report.json`
-under `audit`, with every affected operation.
+the API description so that better guides can be generated. It sits beside the bundle, not in it.
+The same findings are in `report.json` under `specProblems`.
 
 | Finding | Severity |
 |---|---|
-| No server URL; duplicate `operationId`; unresolved `$ref`; no success response; a required security scheme that is not defined | high |
+| No server URL; unresolved `$ref`; no success response; a required security scheme that is not defined | high |
 | Operations that declare no error response | high when half or more do, else medium |
-| No `operationId`; no summary or description; a GET whose response has no schema; path parameters and request bodies with no example; a create response that does not show the new identifier; security schemes no operation requires | medium |
+| No `operationId`, or one used more than once; no summary or description; a GET whose response has no schema; path parameters and request bodies with no example; a create response that does not show the new identifier; security schemes no operation requires | medium |
 | Parameters or security schemes with no description; the same body under several success statuses | low |
 
 High means pages are missing or wrong because of it, medium that pages say less, low is polish. The

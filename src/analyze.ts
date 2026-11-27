@@ -2,7 +2,7 @@
 // sent to an operation, and where identifiers appear in responses. Pure.
 
 import { deref, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
-import { objectProperties, synthesize, validateSampleValues, type SampleValues, type SchemaChecker } from './values.ts';
+import { isControlledHeader, objectProperties, synthesize, validateSampleValues, type SampleValues, type SchemaChecker } from './values.ts';
 import { plural, singular, slugify, words } from './text.ts';
 
 export interface Resource {
@@ -124,6 +124,8 @@ export function buildValues(model: SpecModel, checker: SchemaChecker, op: Operat
 
   for (const p of op.parameters) {
     if (p.in === 'cookie') continue;
+    // The portal sets these itself; a sample that sends one is invalid.
+    if ((p.in === 'header' && (isControlledHeader(p.name) || checker.credentialNames.headers.has(p.name.toLowerCase()))) || (p.in === 'query' && checker.credentialNames.query.has(p.name))) continue;
     const group = p.in === 'path' ? 'path' : p.in === 'query' ? 'query' : 'headers';
     let v: Json;
     if (p.in !== 'header' && bind[p.name] !== undefined) v = bind[p.name];
