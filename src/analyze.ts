@@ -99,7 +99,7 @@ export interface BuiltValues {
   placeholder: boolean;
 }
 
-function explicitExample(doc: Json, p: { example?: Json; examples: Record<string, Json>; schema?: Json }): Json {
+export function explicitExample(doc: Json, p: { example?: Json; examples: Record<string, Json>; schema?: Json }): Json {
   if (p.example !== undefined) return p.example;
   const named = Object.values(p.examples);
   if (named.length) return named[0];

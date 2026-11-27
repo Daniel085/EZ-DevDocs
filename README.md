@@ -19,7 +19,7 @@ node src/cli.ts generate path/to/openapi.yaml --out out
 node src/cli.ts validate out/guides --spec path/to/openapi.yaml
 ```
 
-`generate` writes `out/guides/` (the bundle) and `out/report.json`, and prints a summary. It exits 0
+`generate` writes `out/guides/` (the bundle), `out/report.json` and `out/spec-audit.md`, and prints a summary. It exits 0
 when the bundle passes contract validation, 1 when it does not, and 2 when the input is unusable.
 `--no-timestamp` leaves `generatedAt` out of the manifest, which makes the output byte-identical
 from run to run.
@@ -28,7 +28,7 @@ As a library, with no file access:
 
 ```ts
 import { generate } from 'ez-devdocs';
-const { files, manifest, report } = generate(specBytes, { manifestSchema });
+const { files, manifest, report, auditMarkdown } = generate(specBytes, { manifestSchema });
 ```
 
 ## What it produces
@@ -93,6 +93,25 @@ The assembled document belongs to the API's owner and is not kept in this reposi
 `report.json` lists, per run: the pages produced and their operations, everything skipped and why,
 the gaps a person should complete, problems found in the spec, and the contract validation result.
 
+## The spec audit
+
+Every run also audits the spec and writes `spec-audit.md` for whoever owns it: what to change in
+the API description so that better guides can be generated. The same findings are in `report.json`
+under `audit`, with every affected operation.
+
+| Finding | Severity |
+|---|---|
+| No server URL; duplicate `operationId`; unresolved `$ref`; no success response; a required security scheme that is not defined | high |
+| Operations that declare no error response | high when half or more do, else medium |
+| No `operationId`; no summary or description; a GET whose response has no schema; path parameters and request bodies with no example; a create response that does not show the new identifier; security schemes no operation requires | medium |
+| Parameters or security schemes with no description; the same body under several success statuses | low |
+
+High means pages are missing or wrong because of it, medium that pages say less, low is polish. The
+audit reads only standard OpenAPI. Where operations without error responses carry an extension
+field named like one for errors, it says so, since tools that read the standard do not see it. It
+does not judge the API's design or behavior, and it cannot see what only a person can, such as
+whether the security scheme's description says where credentials are issued.
+
 ## Layout
 
 ```
@@ -101,6 +120,7 @@ src/values.ts     build sample values from schemas, validate them
 src/analyze.ts    resources, identifiers in responses, pagination, errors, rate limits
 src/pages.ts      one generator per page type
 src/generate.ts   orchestration, manifest, report
+src/audit.ts      what the spec's owner should fix
 src/validate.ts   contract validator
 src/text.ts       sanitizing spec text
 src/cli.ts        the only file that touches the file system

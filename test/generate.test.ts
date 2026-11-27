@@ -172,3 +172,65 @@ test('an idempotency key in the request body is generated and gets its page', ()
   assert.match(page, /<Sample operation="createOrder">/);
   assert.deepEqual(report.validation.errors, []);
 });
+
+test('every run audits the spec for its owner', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'Audited', version: '1' },
+    security: [{ key: [] }],
+    paths: {
+      '/things': {
+        post: {
+          operationId: 'createThing',
+          summary: 'Add a thing',
+          'x-errors': '409 conflict',
+          requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string' } } } } } },
+          responses: {
+            '200': { description: 'ok', content: { 'application/json': { schema: { $ref: '#/components/schemas/Thing' } } } },
+            '201': { description: 'ok', content: { 'application/json': { schema: { $ref: '#/components/schemas/Thing' } } } },
+          },
+        },
+      },
+      '/things/{thing_id}': {
+        get: {
+          operationId: 'getThing',
+          summary: 'Get a thing',
+          parameters: [{ name: 'thing_id', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'ok', content: { 'application/json': { schema: { $ref: '#/components/schemas/Thing' } } } }, '404': { description: 'missing' } },
+        },
+      },
+    },
+    components: { securitySchemes: { key: { type: 'http', scheme: 'bearer' } }, schemas: { Thing: { type: 'object', properties: { name: { type: 'string' } } } } },
+  };
+  const { report, auditMarkdown, files } = generate(JSON.stringify(spec), { manifestSchema });
+  const by = Object.fromEntries(report.audit.map((f) => [f.code, f]));
+  assert.deepEqual(Object.keys(by).sort(), [
+    'created-identifier-not-shown',
+    'no-error-responses',
+    'no-request-example',
+    'no-servers',
+    'parameter-no-description',
+    'path-parameter-no-example',
+    'security-scheme-no-description',
+    'several-success-statuses',
+  ]);
+  assert.deepEqual([by['no-error-responses'].count, by['no-error-responses'].of, by['no-error-responses'].subjects], [1, 2, ['createThing']]);
+  assert.match(by['no-error-responses'].detail, /extension field `x-errors`/);
+  assert.equal(report.audit[0].severity, 'high');
+  assert.match(auditMarkdown, /^# Spec audit: Audited 1\n/);
+  assert.match(auditMarkdown, /\*\*Fix:\*\* Add an `example` to each path parameter\./);
+  assert.ok(![...files.keys()].some((f) => /audit/.test(f)), 'the audit is not part of the bundle');
+  assert.equal(generate(JSON.stringify(spec), { manifestSchema }).auditMarkdown, auditMarkdown, 'same audit on every run');
+});
+
+test('spec text in the audit is inert', () => {
+  const spec = {
+    openapi: '3.0.3',
+    info: { title: 'Evil <script>alert(1)</script> {{api_key}}', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: { '/a': { get: { operationId: 'a`b|c', responses: { '200': { description: 'ok' } } } } },
+  };
+  const { auditMarkdown } = generate(JSON.stringify(spec), { manifestSchema });
+  assert.doesNotMatch(auditMarkdown, /<script>|[^\\]\{\{api_key/);
+  assert.doesNotMatch(auditMarkdown, /`a`b/);
+});
