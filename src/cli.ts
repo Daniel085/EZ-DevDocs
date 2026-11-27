@@ -9,15 +9,21 @@ import { loadSpec, SpecError } from './spec.ts';
 import { validateBundle, type BundleFiles } from './validate.ts';
 
 const USAGE = `Usage:
-  ez-devdocs generate <spec> [--out <dir>] [--no-timestamp] [--json]
-      Writes <dir>/guides (the bundle), <dir>/report.json and <dir>/spec-audit.md.
-      Default <dir> is ./out.
+  ez-devdocs generate <spec> [--out <dir>] [--existing <bundle-dir>] [--timestamp] [--json]
+      Writes <dir>/guides (the bundle, with its report.json) and <dir>/spec-audit.md.
+      Default <dir> is ./out. <spec> is the published spec, read as bytes.
+      --existing  the bundle as it stands where people edit it. Pages a person changed
+                  are kept as they are.
+      --timestamp adds generatedAt to the manifest. Without it, output is byte-identical
+                  from run to run.
   ez-devdocs validate <bundle-dir> --spec <spec> [--json]
       Checks an existing bundle against the contract.
 
 Exit code is 0 when the bundle is valid, 1 when it is not, 2 on a usage or input error.`;
 
-const manifestSchema = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'contract', 'guides-manifest.schema.json'), 'utf8'));
+const contractFile = (name: string) => JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'contract', name), 'utf8'));
+const manifestSchema = contractFile('guides-manifest.schema.json');
+const reportSchema = contractFile('guides-report.schema.json');
 
 function readBundle(dir: string): BundleFiles {
   const files: BundleFiles = new Map();
@@ -39,14 +45,17 @@ function main(argv: string[]): number {
     const i = rest.indexOf(name);
     return i >= 0 ? rest[i + 1] : undefined;
   };
-  const positional = rest.filter((a, i) => !a.startsWith('--') && !['--out', '--spec'].includes(rest[i - 1] ?? ''));
+  const positional = rest.filter((a, i) => !a.startsWith('--') && !['--out', '--spec', '--existing'].includes(rest[i - 1] ?? ''));
   const json = flags.has('--json');
 
   if (command === 'generate' && positional[0]) {
     const out = resolve(option('--out') ?? 'out');
+    const existingDir = option('--existing');
     const result = generate(readFileSync(positional[0]), {
       manifestSchema,
-      generatedAt: flags.has('--no-timestamp') ? undefined : new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
+      reportSchema,
+      generatedAt: flags.has('--timestamp') ? new Date().toISOString().replace(/\.\d+Z$/, 'Z') : undefined,
+      existing: existingDir ? readBundle(resolve(existingDir)) : undefined,
     });
     const bundleDir = join(out, 'guides');
     rmSync(bundleDir, { recursive: true, force: true });
@@ -55,17 +64,18 @@ function main(argv: string[]): number {
       mkdirSync(dirname(full), { recursive: true });
       writeFileSync(full, bytes);
     }
-    writeFileSync(join(out, 'report.json'), JSON.stringify(result.report, null, 2) + '\n');
     writeFileSync(join(out, 'spec-audit.md'), result.auditMarkdown);
-    process.stdout.write(json ? JSON.stringify(result.report, null, 2) + '\n' : summarize(result.report) + `\nBundle: ${bundleDir}\nReport: ${join(out, 'report.json')}\nAudit:  ${join(out, 'spec-audit.md')}\n`);
-    return result.report.validation.ok ? 0 : 1;
+    process.stdout.write(json ? JSON.stringify({ report: result.report, validation: result.validation }, null, 2) + '\n' : summarize(result.report, result.validation) + `\nBundle: ${bundleDir}\nReport: ${join(bundleDir, 'report.json')}\nAudit:  ${join(out, 'spec-audit.md')}\n`);
+    return result.validation.ok ? 0 : 1;
   }
   if (command === 'validate' && positional[0] && option('--spec')) {
-    const report = validateBundle(readBundle(resolve(positional[0])), loadSpec(readFileSync(option('--spec')!)), { manifestSchema });
+    const report = validateBundle(readBundle(resolve(positional[0])), loadSpec(readFileSync(option('--spec')!)), { manifestSchema, reportSchema });
     if (json) process.stdout.write(JSON.stringify(report, null, 2) + '\n');
     else {
-      for (const f of [...report.errors, ...report.warnings]) process.stdout.write(`${f.severity.padEnd(7)} ${f.file}${f.line ? ':' + f.line : ''} ${f.code}: ${f.message}\n`);
-      process.stdout.write(`${report.ok ? 'Valid' : 'Invalid'}: ${report.errors.length} errors, ${report.warnings.length} warnings\n`);
+      for (const f of report.findings) process.stdout.write(`${f.severity.padEnd(7)} ${f.file}${f.line ? ':' + f.line : ''} ${f.code}: ${f.message}\n`);
+      const n = (sev: string) => report.findings.filter((f) => f.severity === sev).length;
+      process.stdout.write(`${report.ok ? 'Valid' : 'Invalid'}: ${n('error')} errors, ${n('blocker')} blockers, ${n('warning')} warnings\n`);
+      if (report.withheld.length) process.stdout.write(`Withheld from publishing: ${report.withheld.join(', ')}\n`);
     }
     return report.ok ? 0 : 1;
   }

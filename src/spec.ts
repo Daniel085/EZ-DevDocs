@@ -87,9 +87,48 @@ export interface SpecModel {
 
 const METHODS = ['get', 'put', 'post', 'delete', 'options', 'head', 'patch', 'trace'];
 
-/** The portal's rule for a missing operationId: `{method}_{path}`, non-alphanumerics become `_`. */
+/** The base of a derived operation id: the method, then the path with every code point outside A-Z a-z 0-9 as `_`. */
 export function deriveOperationId(method: string, path: string): string {
-  return method.toLowerCase() + path.replace(/[^A-Za-z0-9]/g, '_');
+  return method.toLowerCase() + Array.from(path, (c) => (/^[A-Za-z0-9]$/.test(c) ? c : '_')).join('');
+}
+
+/** Compares by Unicode code point, as the contract requires, not by UTF-16 code unit or locale. */
+export function compareCodePoints(a: string, b: string): number {
+  const x = Array.from(a);
+  const y = Array.from(b);
+  for (let i = 0; i < x.length && i < y.length; i++) {
+    const d = x[i]!.codePointAt(0)! - y[i]!.codePointAt(0)!;
+    if (d) return d;
+  }
+  return x.length - y.length;
+}
+
+/**
+ * The contract's operation id algorithm (section 1.1). Operations are walked sorted by path, then
+ * method. An explicit id that is not yet taken is kept; every other operation gets the derived
+ * id, with `_2`, `_3`, ... appended until it is unused.
+ */
+export function assignOperationIds(list: { path: string; method: string; operationId?: string }[]): { id: string; derived: boolean; duplicateOf?: string }[] {
+  const order = list.map((_, i) => i).sort((i, j) => compareCodePoints(list[i]!.path, list[j]!.path) || compareCodePoints(list[i]!.method, list[j]!.method));
+  const out: { id: string; derived: boolean; duplicateOf?: string }[] = new Array(list.length);
+  const taken = new Set<string>();
+  const pending: number[] = [];
+  for (const i of order) {
+    const explicit = list[i]!.operationId;
+    if (typeof explicit === 'string' && explicit !== '' && !taken.has(explicit)) {
+      taken.add(explicit);
+      out[i] = { id: explicit, derived: false };
+    } else pending.push(i);
+  }
+  for (const i of pending) {
+    const base = deriveOperationId(list[i]!.method, list[i]!.path);
+    let id = base;
+    for (let n = 2; taken.has(id); n++) id = `${base}_${n}`;
+    taken.add(id);
+    const explicit = list[i]!.operationId;
+    out[i] = { id, derived: true, ...(typeof explicit === 'string' && explicit !== '' ? { duplicateOf: explicit } : {}) };
+  }
+  return out;
 }
 
 export function sha256(data: string | Uint8Array): string {
@@ -193,6 +232,16 @@ export function loadSpec(source: string | Uint8Array): SpecModel {
     return out;
   };
 
+  // Identifiers first: they depend on every operation in the document (contract 1.1).
+  const listed: { path: string; method: string; operationId?: string }[] = [];
+  for (const [path, rawItem] of Object.entries(doc.paths ?? {})) {
+    const item = deref(doc, rawItem);
+    if (!item || typeof item !== 'object') continue;
+    for (const method of METHODS) if (item[method] && typeof item[method] === 'object') listed.push({ path, method, operationId: item[method].operationId });
+  }
+  const assigned = assignOperationIds(listed);
+  let index = 0;
+
   for (const [path, rawItem] of Object.entries(doc.paths ?? {})) {
     const item = deref(doc, rawItem, issues);
     if (!item || typeof item !== 'object') continue;
@@ -200,10 +249,10 @@ export function loadSpec(source: string | Uint8Array): SpecModel {
     for (const method of METHODS) {
       const op = item[method];
       if (!op || typeof op !== 'object') continue;
-      const derivedId = typeof op.operationId !== 'string' || op.operationId === '';
-      const id = derivedId ? deriveOperationId(method, path) : op.operationId;
+      const { id, derived: derivedId, duplicateOf } = assigned[index++]!;
       const label = `${method.toUpperCase()} ${path}`;
-      if (derivedId) issues.push({ code: 'missing-operation-id', subject: label, message: `${label} has no operationId. Using '${id}'.` });
+      if (duplicateOf !== undefined) issues.push({ code: 'duplicate-operation-id', subject: label, message: `operationId '${duplicateOf}' is used more than once. ${label} is identified as '${id}'.` });
+      else if (derivedId) issues.push({ code: 'missing-operation-id', subject: label, message: `${label} has no operationId. Using '${id}'.` });
 
       const own = buildParams(op.parameters);
       const parameters = [...shared.filter((s) => !own.some((o) => o.name === s.name && o.in === s.in)), ...own];
@@ -254,10 +303,6 @@ export function loadSpec(source: string | Uint8Array): SpecModel {
         security: Array.isArray(op.security) ? op.security : globalSecurity,
         hasCallbacks: !!op.callbacks && Object.keys(op.callbacks).length > 0,
       };
-      if (operationsById.has(id)) {
-        issues.push({ code: 'duplicate-operation-id', subject: label, message: `operationId '${id}' is used more than once. ${label} was ignored.` });
-        continue;
-      }
       operationsById.set(id, operation);
       operations.push(operation);
     }

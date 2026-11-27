@@ -57,12 +57,19 @@ export const isPage = (r: Result): r is Page => 'body' in r;
 // ---------------------------------------------------------------------------------------------
 // Building blocks
 
-/** An identifier can be written into a component attribute and a link target. */
-const usableId = (id: string) => /^[A-Za-z0-9_.\-/:~@$]+$/.test(id);
-const usableSchema = (name: string) => /^[A-Za-z0-9_.\-]+$/.test(name);
+/**
+ * An identifier can be written into a component attribute: any text without a double quote or a
+ * line break (contract 4.5). Angle brackets are left out too, because this module's own validator
+ * reads tags line by line.
+ */
+const usableId = (id: string) => id !== '' && !/["\r\n<>]/.test(id);
+const usableSchema = usableId;
 
-const opLink = (op: Operation) => (usableId(op.id) ? `[${code(op.id)}](op:${op.id})` : code(op.id));
-const schemaLink = (name: string) => (usableSchema(name) ? `[${code(name)}](schema:${name})` : code(name));
+/** The part of a link target after its scheme: the listed characters as themselves, the rest percent-encoded. */
+const target = (id: string) => Array.from(id, (c) => (/^[A-Za-z0-9_.\-/:~@$!*+,;=]$/.test(c) ? c : [...new TextEncoder().encode(c)].map((b) => '%' + b.toString(16).toUpperCase().padStart(2, '0')).join(''))).join('');
+
+const opLink = (op: Operation) => (usableId(op.id) ? `[${code(op.id)}](op:${target(op.id)})` : code(op.id));
+const schemaLink = (name: string) => (usableSchema(name) ? `[${code(name)}](schema:${target(name)})` : code(name));
 const article = (noun: string) => (/^[aeiou]/i.test(noun) ? `an ${noun}` : `a ${noun}`);
 
 class Doc {
@@ -265,8 +272,8 @@ export function quickstartPage(ctx: Ctx): Result {
   if (scheme) {
     const t = describeScheme(schemeName!, scheme);
     d.add('<Step title="Get your credentials">', `{{api_name}} authenticates requests with ${t.noun}.`, prose(scheme.description, 400));
-    d.add('<Callout type="note" title="Where to get credentials">', 'The API description does not say how credentials are issued. Ask the API provider if you do not have them yet.', '</Callout>');
-    d.gaps.push('Quickstart step "Get your credentials": the spec does not say how credentials are issued. Replace the callout with real instructions.');
+    // The portal shows its own "get a key" link (contract 9), so the page says nothing about issuing.
+    d.gaps.push('The spec does not say how credentials are issued. The portal links to where a reader gets a key; make sure that link is set.');
     d.add('</Step>', '<Step title="Authenticate your requests">', t.how, callIsOpen ? `${opLink(call!.op)}, the call below, is one of the operations that needs no credentials.` : 'The samples on this page include your credentials for you.');
     if (ctx.has('authentication')) d.add('For the details, see [Authentication](guide:authentication).');
     d.add('</Step>');
