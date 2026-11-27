@@ -63,7 +63,7 @@ for agents.
 
 The description is served a piece at a time (`/openapi`, `/openapi/operations/{id}`,
 `/openapi/schemas/{name}`), and only with an API key. `/openapi.json` returns 404. Reading all of it
-took about 1,400 requests and an assembly script; the pieces did merge cleanly, with no conflicting
+took 1166 requests and an assembly script; the pieces did merge cleanly, with no conflicting
 schema definitions.
 
 Effect: standard tools cannot be pointed at the API, and a published document cannot be diffed
