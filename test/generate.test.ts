@@ -132,7 +132,7 @@ test('identifiers in a request body come from records created earlier on the pag
 test('long descriptions end on a whole sentence', () => {
   const t = 'First rule here. ' + 'Second rule goes on for a while. '.repeat(3) + 'A final sentence that is cut.';
   const out = prose(t, 100);
-  assert.ok(out.length <= 100 && out.endsWith('.') && !out.includes('…'));
+  assert.ok(out.length <= 100 && out.endsWith('. …'), 'ends on a sentence, and the cut is marked');
   assert.ok(prose('word '.repeat(50), 40).endsWith('…'), 'no sentence to end on: cut at a word');
 });
 

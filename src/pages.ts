@@ -141,7 +141,9 @@ function opList(ops: Operation[], max = 12): string {
 const opIntro = (op: Operation) => {
   const summary = prose(op.summary, 160).replace(/[.\s]+$/, '');
   // A flow step keeps the operation's rules, which specs often put late in the description.
-  const desc = prose(op.description, 1200);
+  let desc = prose(op.description, 1200);
+  // Say so when the description was shortened, and point at the reference, which has all of it.
+  if (desc.endsWith(' …')) desc = desc.slice(0, -2) + (usableId(op.id) ? ` The reference for ${opLink(op)} has the rest of this description.` : ' The reference has the rest of this description.');
   const same = (x?: string) => plainText(x).toLowerCase().replace(/s\b|[^a-z0-9]/g, '');
   return [`Call ${opLink(op)}${summary ? `: ${summary}.` : '.'}`, desc && same(op.description) !== same(op.summary) ? desc : ''].filter(Boolean).join('\n\n');
 };
