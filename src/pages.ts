@@ -368,19 +368,20 @@ export function paginationPage(ctx: Ctx): Result {
 export function idempotencyPage(ctx: Ctx): Result {
   const { model, checker } = ctx;
   const info = findIdempotency(model);
-  if (!info) return { page: 'idempotency', reason: 'no operation takes an idempotency header' };
+  if (!info) return { page: 'idempotency', reason: 'no operation takes an idempotency key in a header or in its request body' };
   const d = new Doc();
-  d.add(`${info.operations.length === 1 ? 'One operation in {{api_name}} accepts' : `${info.operations.length} operations in {{api_name}} accept`} the ${code(info.header)} header.`, prose(info.description, 600));
-  if (!info.description) d.gaps.push(`The spec does not describe the '${info.header}' header. Explain what the API does with a repeated key.`);
+  const place = info.where === 'header' ? `the ${code(info.name)} header` : `${code(info.name)} in the request body`;
+  d.add(`${info.operations.length === 1 ? 'One operation in {{api_name}} accepts' : `${info.operations.length} operations in {{api_name}} accept`} ${place}.`, prose(info.description, 600));
+  if (!info.description) d.gaps.push(`The spec does not describe '${info.name}'. Explain what the API does with a repeated key.`);
   for (const op of info.operations) {
     if (!usableId(op.id)) continue;
     const built = buildValues(model, checker, op);
-    if (!built.ok) continue;
+    if (!built.ok || !JSON.stringify(built.values).includes('{{idempotency_key}}')) continue;
     d.add('## Example', `${opLink(op)} with a generated key:`);
     d.sample(op, built);
     break;
   }
-  d.add('## Operations that accept the header', opList(info.operations));
+  d.add('## Operations that accept a key', opList(info.operations));
   for (const op of info.operations.slice(0, 12)) if (usableId(op.id)) d.operations.add(op.id);
   return d.finish('idempotency', 'concept', 'Idempotency', `Which operations in ${meta(model.title, 120)} accept an idempotency key.`);
 }

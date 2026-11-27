@@ -90,6 +90,10 @@ paths:
                 customer_id: { type: string, format: uuid }
                 site_id: { type: string, format: uuid }
                 warehouse_id: { type: string, format: uuid }
+                idempotency_key:
+                  type: string
+                  pattern: '^[A-Za-z0-9._:-]{8,200}$'
+                  description: A key you make up for this request. A repeat with the same key answers with what the first one did.
                 lines:
                   type: array
                   items:

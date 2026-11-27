@@ -163,6 +163,15 @@ export function buildValues(model: SpecModel, checker: SchemaChecker, op: Operat
     if (!good) return fail(candidates.length ? 'no example or generated request body passes the request schema' : 'could not build a request body from the schema');
     values.body = good.value;
     placeholder ||= good.placeholder;
+    // A key in the body is generated for the reader, as one in a header is.
+    const keyField = idempotencyBodyField(model, op);
+    if (keyField && values.body && typeof values.body === 'object' && !Array.isArray(values.body)) {
+      const withKey = { ...values.body, [keyField]: '{{idempotency_key}}' };
+      if (validateSampleValues(op, { ...values, body: withKey }, checker).length === 0) {
+        values.body = withKey;
+        good.name = undefined;
+      }
+    }
     if (good.name && /^[A-Za-z0-9_.\-]+$/.test(good.name) && !values.path && !values.query && !values.headers) exampleName = good.name;
   }
 
@@ -488,16 +497,36 @@ export function findRateLimits(model: SpecModel): RateLimitInfo | undefined {
   return operations.length ? { operations, description, headers } : undefined;
 }
 
-export function findIdempotency(model: SpecModel): { header: string; description?: string; operations: Operation[] } | undefined {
-  const operations: Operation[] = [];
-  let header: string | undefined;
-  let description: string | undefined;
+/** The top-level request body property that carries an idempotency key, if the body has one. */
+export function idempotencyBodyField(model: SpecModel, op: Operation): string | undefined {
+  const rb = op.requestBody;
+  if (!rb?.schema || !/json|x-www-form-urlencoded/i.test(rb.contentType)) return undefined;
+  return Object.keys(objectProperties(model.doc, rb.schema)).find((k) => /idempotency/i.test(k) && isScalar(model.doc, objectProperties(model.doc, rb.schema)[k]));
+}
+
+export interface IdempotencyInfo {
+  /** Where the key goes in most operations that take one. */
+  where: 'header' | 'body';
+  /** The header or body field name. */
+  name: string;
+  description?: string;
+  operations: Operation[];
+}
+
+export function findIdempotency(model: SpecModel): IdempotencyInfo | undefined {
+  const found = { header: [] as [Operation, string, string | undefined][], body: [] as [Operation, string, string | undefined][] };
   for (const op of model.operations) {
+    if (op.deprecated) continue;
     const p = op.parameters.find((x) => x.in === 'header' && /idempotency/i.test(x.name));
-    if (!p) continue;
-    header ??= p.name;
-    description ??= p.description;
-    operations.push(op);
+    if (p) {
+      found.header.push([op, p.name, p.description]);
+      continue;
+    }
+    const field = idempotencyBodyField(model, op);
+    if (field) found.body.push([op, field, deref(model.doc, objectProperties(model.doc, op.requestBody!.schema)[field])?.description]);
   }
-  return header ? { header, description, operations } : undefined;
+  const where = found.header.length >= found.body.length ? 'header' : 'body';
+  const list = found[where];
+  if (list.length === 0) return undefined;
+  return { where, name: list[0]![1], description: list.find(([, , d]) => d)?.[2], operations: list.map(([op]) => op) };
 }

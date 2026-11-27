@@ -162,3 +162,13 @@ test('the quickstart calls an operation that needs credentials when the API has 
   assert.ok(!report.gaps.some((g) => g.message.includes('declares no authentication')));
   assert.ok(!report.specIssues.some((i) => i.code === 'no-request-example'), 'an example on the schema counts');
 });
+
+test('an idempotency key in the request body is generated and gets its page', () => {
+  const { files, report } = generate(readFileSync(join(root, 'fixtures/specs/body-references.yaml')), { manifestSchema });
+  assert.match(text(files.get('pages/orders/manage.md')!), /"idempotency_key": "\{\{idempotency_key\}\}"/);
+  const page = text(files.get('pages/idempotency.md')!);
+  assert.match(page, /accepts `idempotency_key` in the request body/);
+  assert.match(page, /A repeat with the same key answers with what the first one did/);
+  assert.match(page, /<Sample operation="createOrder">/);
+  assert.deepEqual(report.validation.errors, []);
+});

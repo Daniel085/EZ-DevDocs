@@ -39,7 +39,7 @@ const { files, manifest, report } = generate(specBytes, { manifestSchema });
 | `authentication` | The spec declares a security scheme. |
 | `errors` | Any operation documents a 4xx, 5xx or `default` response. |
 | `pagination` | List operations take cursor, offset or page parameters. |
-| `idempotency` | An operation takes an idempotency header. |
+| `idempotency` | An operation takes an idempotency key, in a header or as a field of its request body. |
 | `rate-limits` | The spec documents a 429 response or a rate limit header. |
 | `webhooks` | The spec has `webhooks` or callbacks. |
 | `<resource>/manage` | A resource can be created, and the new identifier can be carried into retrieve, update or delete. |
