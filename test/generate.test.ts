@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { errorsOf, generate, loadSpec, deriveOperationId, SpecError, validateBundle } from '../src/index.ts';
+import { errorsOf, generate, GenerationError, loadSpec, deriveOperationId, SpecError, validateBundle } from '../src/index.ts';
 import { sha256 } from '../src/spec.ts';
 import { attr, code, meta, prose } from '../src/text.ts';
 
@@ -492,4 +492,94 @@ test('a page built from placeholder values says so', () => {
 test('a create step reports 201 where the spec declares it', () => {
   const page = text(generate(readFileSync(join(root, 'fixtures/specs/body-references.yaml')), { manifestSchema }).files.get('pages/customers/manage.md')!);
   assert.match(page, /A successful call returns `201`/);
+});
+
+// --- Vendor extensions
+
+const extSpec = () => ({
+  openapi: '3.1.0',
+  info: { title: 'T', version: '1' },
+  servers: [{ url: 'https://api.example.test' }],
+  'x-internal': { owner: 'team' },
+  paths: {
+    '/things': {
+      post: {
+        operationId: 'createThing',
+        summary: 'Add a thing',
+        'x-required-permission': 'thing.manage',
+        'x-checks-within': ['price.override', 'tax.override'],
+        'x-feature': 'things',
+        'x-safe-to-repeat': true,
+        'x-note': 'An agent <script>alert(1)</script> key needs {{api_key}} a [person](https://evil.example).',
+        'x-errors': '409 conflict: each a Problem.',
+        'x-shape': { a: 1 },
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string', example: 'a', 'x-money': true } } } } } },
+        responses: { '201': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: { id: { type: 'string' } } } } } } },
+      },
+    },
+    '/things/{thing_id}': { get: { operationId: 'getThing', 'x-errors': '404 not_found: each a Problem.', parameters: [{ name: 'thing_id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok' } } } },
+  },
+});
+
+test('vendor extensions are found and reported, and change no page until the settings give them a role', () => {
+  const plain = generate(JSON.stringify(extSpec()), { manifestSchema, reportSchema });
+  const by = Object.fromEntries(plain.report.extensions.map((e) => [e.name, e]));
+  assert.deepEqual(Object.keys(by).sort(), ['x-checks-within', 'x-errors', 'x-feature', 'x-internal', 'x-money', 'x-note', 'x-required-permission', 'x-safe-to-repeat', 'x-shape']);
+  assert.deepEqual([by['x-errors'].count, by['x-errors'].where, by['x-errors'].shapes, by['x-errors'].suggestedRole, by['x-errors'].role], [2, ['operation'], ['string'], 'errors', undefined]);
+  assert.equal(by['x-required-permission'].suggestedRole, 'permission');
+  assert.equal(by['x-feature'].suggestedRole, 'requires');
+  assert.equal(by['x-money'].suggestedRole, undefined, 'an extension that is not on operations gets no suggestion');
+  assert.equal(by['x-shape'].suggestedRole, undefined, 'nor does one whose value is not text');
+  const pages = [...plain.files].filter(([f]) => f.startsWith('pages/')).map(([, b]) => text(b)).join('\n');
+  assert.doesNotMatch(pages, /thing\.manage|price\.override|not_found/, 'a suggestion alone shows nothing');
+  assert.ok(!plain.files.has('pages/permissions.md') && !plain.files.has('pages/errors.md'));
+  assert.match(plain.auditMarkdown, /## Vendor extensions[\s\S]*`x-required-permission` \| 1 \| operation \| none \(its name suggests permission\)/);
+});
+
+test('an extension given a role is shown in the spec\'s own words', () => {
+  const settings = {
+    extensions: {
+      'x-required-permission': { role: 'permission' as const },
+      'x-checks-within': { role: 'permission' as const, label: 'May also need' },
+      'x-feature': { role: 'requires' as const, label: 'Feature that must be on' },
+      'x-safe-to-repeat': { role: 'note' as const },
+      'x-note': { role: 'note' as const },
+      'x-errors': { role: 'errors' as const },
+      'x-shape': { role: 'note' as const },
+      'x-money': { role: 'ignore' as const },
+    },
+  };
+  const a = generate(JSON.stringify(extSpec()), { manifestSchema, reportSchema, settings });
+  assert.deepEqual(errorsOf(a.validation), []);
+  const page = text(a.files.get('pages/things/manage.md')!);
+  assert.match(page, /\*\*Permission needed:\*\* `thing\.manage`\./);
+  assert.match(page, /\*\*May also need:\*\* `price\.override`, `tax\.override`\./);
+  assert.match(page, /\*\*Feature that must be on:\*\* `things`\./);
+  assert.match(page, /\*\*Safe to repeat\.\*\*/);
+  assert.match(page, /\*\*Note:\*\* An agent key needs \\\{\\\{api\\_key\\\}\\\} a person\./, 'extension text is sanitized like any spec text');
+  assert.doesNotMatch(page, /<script|evil\.example|x-shape|"a": 1/);
+
+  const permissions = text(a.files.get('pages/permissions.md')!);
+  assert.match(permissions, /\| `thing\.manage` \| \[`createThing`\]\(op:createThing\) \|/);
+  assert.match(permissions, /## May also need[\s\S]*`price\.override`/);
+  const errors = text(a.files.get('pages/errors.md')!);
+  assert.match(errors, /declares no error responses[\s\S]*From `x-errors`, on 2 operations[\s\S]*409 conflict: each a Problem\./);
+  assert.ok(a.report.gaps.some((g) => g.page === 'errors' && /vendor extension/.test(g.message)));
+
+  const by = Object.fromEntries(a.report.extensions.map((e) => [e.name, e]));
+  assert.deepEqual([by['x-required-permission'].role, by['x-required-permission'].shown], ['permission', true]);
+  assert.equal(by['x-internal'].role, undefined, 'an extension the settings do not name stays undecided');
+  assert.equal(by['x-money'].shown, undefined);
+
+  const b = generate(JSON.stringify(extSpec()), { manifestSchema, reportSchema, settings });
+  for (const [file, bytes] of a.files) assert.equal(text(b.files.get(file)!), text(bytes), `${file}: the same settings give the same bytes`);
+});
+
+test('unusable settings are refused', () => {
+  const run = (settings: unknown) => generate(JSON.stringify(extSpec()), { manifestSchema, settings: settings as never });
+  assert.throws(() => run({ extensions: { 'x-note': { role: 'banner' } } }), GenerationError);
+  assert.throws(() => run({ extensions: { note: { role: 'note' } } }), GenerationError);
+  assert.throws(() => run({ extension: {} }), GenerationError);
+  assert.throws(() => run({ extensions: { 'x-note': { role: 'note', label: '' } } }), GenerationError);
+  assert.doesNotThrow(() => run({ extensions: { 'x-absent': { role: 'ignore' } } }), 'a setting for an extension this spec lacks is harmless');
 });

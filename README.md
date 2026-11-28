@@ -66,7 +66,8 @@ const { files, manifest, report, validation, auditMarkdown } = generate(specByte
 |---|---|
 | `quickstart` | Always, if the spec has an operation. Credentials, authentication, one call, the response. |
 | `authentication` | The spec declares a security scheme. |
-| `errors` | Any operation documents a 4xx, 5xx or `default` response. |
+| `errors` | Any operation documents a 4xx, 5xx or `default` response, or the settings give an extension the role `errors`. |
+| `permissions` | The settings give an extension the role `permission`. |
 | `pagination` | List operations take cursor, offset or page parameters. |
 | `idempotency` | An operation takes an idempotency key, in a header or as a field of its request body. |
 | `rate-limits` | The spec documents a 429 response or a rate limit header. |
@@ -129,6 +130,46 @@ Some APIs do not publish one OpenAPI file. `scripts/fetch-retavon-spec.mjs` asse
 Retavon API from its per-operation and per-schema reads; it needs an API key in `RETAVON_API_KEY`.
 The assembled document belongs to the API's owner and is not kept in this repository.
 
+## Vendor extensions
+
+Specs carry fields beyond OpenAPI, named `x-…`. They have no declared meaning and no two vendors
+use the same ones, so the module assumes nothing about them:
+
+- **Every run finds them all** and lists them in the printed summary, in `report.json` under
+  `extensions`, and in `spec-audit.md`: the name, how often and where it is used, the kind of value,
+  and one example. Where the name and values suggest a role, it says so. A suggestion has no effect.
+- **An extension reaches a page only when the settings for the build give it a role.**
+
+```bash
+node src/cli.ts generate spec.yaml --out out --settings settings.json        # use the choices in the file
+node src/cli.ts generate spec.yaml --out out --settings settings.json --ask  # ask about the undecided ones, and save
+```
+
+```json
+{
+  "extensions": {
+    "x-required-permission": { "role": "permission" },
+    "x-feature": { "role": "requires", "label": "Feature that must be on" },
+    "x-agent-proposes": { "role": "note", "label": "With an agent key, a person must approve" },
+    "x-errors": { "role": "errors" },
+    "x-money": { "role": "ignore" }
+  }
+}
+```
+
+| Role | What it does |
+|---|---|
+| `permission` | A line on every step that calls the operation, and a `permissions` page listing each permission with its operations. |
+| `requires` | A line on every step: something that must be so before the call. |
+| `note` | The extension's text on every step, after the label. |
+| `errors` | Builds the `errors` page from the extension's text when the spec declares no error responses. |
+| `ignore` | Nothing, and it stops being listed as undecided. |
+
+Only an extension written on an operation, with a value that is text, a number, a true or false,
+or a list of those, can be shown. Its words are the spec's, sanitized like a description. The
+settings are an input like the spec: the same spec and settings give the same bytes. `--ask` reads
+answers from the terminal and belongs to the command; the library takes `settings` and asks nothing.
+
 ## Running the guides against a real API
 
 ```bash
@@ -182,6 +223,7 @@ src/analyze.ts    resources, identifiers in responses, pagination, errors, rate 
 src/pages.ts      one generator per page type
 src/generate.ts   orchestration, manifest, report
 src/audit.ts      what the spec's owner should fix
+src/extensions.ts vendor extensions: finding them, and the settings that give them a role
 src/validate.ts   contract validator
 src/text.ts       sanitizing spec text
 src/cli.ts        the only file that touches the file system

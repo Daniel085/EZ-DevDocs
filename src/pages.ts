@@ -17,6 +17,7 @@ import {
   type PrereqState,
   type Resource,
 } from './analyze.ts';
+import { defaultLabel, operationExtensions, textValues, type Settings } from './extensions.ts';
 import { deref, schemaRefName, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
 import { attr, capitalize, code, frontmatter, meta, plainText, prose, singular, slugify, words } from './text.ts';
 
@@ -51,6 +52,8 @@ export interface Ctx {
   resources: Resource[];
   /** Whether another page will exist in the bundle, so links to it are safe. */
   has: (slug: string) => boolean;
+  /** What this build does with the spec's vendor extensions. */
+  settings: Settings;
 }
 
 export type Result = Page | Skipped;
@@ -155,14 +158,36 @@ function opList(ops: Operation[], max = 12): string {
   return shown.join('\n');
 }
 
-const opIntro = (op: Operation) => {
+/**
+ * What the spec says about an operation in vendor extensions that this build's settings give a
+ * role: a permission, something required, or a note. One line each, in the spec's own words.
+ */
+function extensionLines(ctx: Ctx, op: Operation): string[] {
+  const out: string[] = [];
+  for (const [name, value] of operationExtensions(ctx.model, op)) {
+    const setting = ctx.settings.extensions?.[name];
+    if (!setting || setting.role === 'ignore' || setting.role === 'errors') continue;
+    const values = textValues(value);
+    if (values === undefined || value === false) continue;
+    const label = prose(setting.label ?? defaultLabel(name, setting.role), 80);
+    if (values.length === 0) {
+      if (value === true) out.push(`**${label}.**`);
+      continue;
+    }
+    const shown = setting.role === 'note' ? values.map((v) => prose(v, 600)).join('; ') : values.map((v) => code(v)).join(', ');
+    out.push(`**${label}:** ${shown}${setting.role === 'note' && /[.!?]$/.test(shown) ? '' : '.'}`);
+  }
+  return out;
+}
+
+const opIntro = (ctx: Ctx, op: Operation) => {
   const summary = prose(op.summary, 160).replace(/[.\s]+$/, '');
   // A flow step keeps the operation's rules, which specs often put late in the description.
   let desc = prose(op.description, 1200);
   // Say so when the description was shortened, and point at the reference, which has all of it.
   if (desc.endsWith(' …')) desc = desc.slice(0, -2) + (usableId(op.id) ? ` The reference for ${opLink(op)} has the rest of this description.` : ' The reference has the rest of this description.');
   const same = (x?: string) => plainText(x).toLowerCase().replace(/s\b|[^a-z0-9]/g, '');
-  return [`Call ${opLink(op)}${summary ? `: ${summary}.` : '.'}`, desc && same(op.description) !== same(op.summary) ? desc : ''].filter(Boolean).join('\n\n');
+  return [`Call ${opLink(op)}${summary ? `: ${summary}.` : '.'}`, desc && same(op.description) !== same(op.summary) ? desc : '', ...extensionLines(ctx, op)].filter(Boolean).join('\n\n');
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -297,7 +322,7 @@ export function quickstartPage(ctx: Ctx): Result {
   }
 
   if (call) {
-    d.add('<Step title="Make your first call">', opIntro(call.op), 'Requests go to {{base_url}}.');
+    d.add('<Step title="Make your first call">', opIntro(ctx, call.op), 'Requests go to {{base_url}}.');
     d.sample(call.op, call.built);
     d.add('</Step>', '<Step title="Read the response">');
     d.response(model, call.op);
@@ -341,7 +366,7 @@ export function quickstartPage(ctx: Ctx): Result {
 export function errorsPage(ctx: Ctx): Result {
   const { model } = ctx;
   const info = findErrors(model);
-  if (!info) return { page: 'errors', reason: 'no operation documents an error response' };
+  if (!info) return errorsFromExtension(ctx) ?? { page: 'errors', reason: 'no operation documents an error response' };
   const d = new Doc();
   d.add('{{api_name}} reports failures with HTTP status codes. This page lists the error responses the API description documents.');
   d.add('## Status codes', table(['Status', 'Most common description', 'Operations'], info.statuses.map((s) => [code(s.status), prose(s.description, 160), String(s.count)])));
@@ -352,6 +377,53 @@ export function errorsPage(ctx: Ctx): Result {
   const silent = model.operations.filter((op) => !op.responses.some((r) => /^([45]|default)/i.test(r.status)));
   if (silent.length) d.gaps.push(`${silent.length} of ${model.operations.length} operations document no error response.`);
   return d.finish('errors', 'concept', 'Errors', `The error responses ${meta(model.title, 120)} documents, and what they mean.`);
+}
+
+/** The values an extension with a given role takes across operations, with the operations that carry each. */
+function extensionValues(ctx: Ctx, role: 'permission' | 'errors'): { name: string; byValue: Map<string, Operation[]> }[] {
+  const out = new Map<string, Map<string, Operation[]>>();
+  for (const op of ctx.model.operations) {
+    if (op.deprecated) continue;
+    for (const [name, value] of operationExtensions(ctx.model, op)) {
+      if (ctx.settings.extensions?.[name]?.role !== role) continue;
+      for (const v of textValues(value) ?? []) {
+        const byValue = out.get(name) ?? new Map<string, Operation[]>();
+        byValue.set(v, [...(byValue.get(v) ?? []), op]);
+        out.set(name, byValue);
+      }
+    }
+  }
+  return [...out].map(([name, byValue]) => ({ name, byValue }));
+}
+
+/** Errors as an extension describes them, for a spec that declares no error responses. */
+function errorsFromExtension(ctx: Ctx): Result | undefined {
+  const found = extensionValues(ctx, 'errors');
+  if (found.length === 0) return undefined;
+  const d = new Doc();
+  d.add('The API description declares no error responses. It describes errors in a vendor extension, and this page shows what it says there, in its own words.');
+  for (const { name, byValue } of found) {
+    const rows = [...byValue].sort((a, b) => b[1].length - a[1].length || (a[0] < b[0] ? -1 : 1));
+    d.add(`## ${prose(ctx.settings.extensions?.[name]?.label ?? 'What the description says', 80)}`, `From ${code(name)}, on ${rows.reduce((n, r) => n + r[1].length, 0)} operations. The most common texts:`);
+    d.add(table(['The description says', 'Operations'], rows.slice(0, 12).map(([text, ops]) => [prose(text, 600), String(ops.length)])));
+    if (rows.length > 12) d.add(`${rows.length - 12} more texts appear on fewer operations. Each operation's reference has its own.`);
+  }
+  d.gaps.push('The errors page is built from a vendor extension, as text. The spec declares no error responses, so no status table or error schema could be shown.');
+  return d.finish('errors', 'concept', 'Errors', `What ${meta(ctx.model.title, 120)} says about how calls fail.`);
+}
+
+export function permissionsPage(ctx: Ctx): Result {
+  const found = extensionValues(ctx, 'permission');
+  if (found.length === 0) return { page: 'permissions', reason: 'no vendor extension has the role permission in this build\'s settings' };
+  const d = new Doc();
+  d.add('Some operations in {{api_name}} need a permission. This page lists the permissions the API description names and the operations that need each.');
+  for (const { name, byValue } of found) {
+    const rows = [...byValue].sort((a, b) => (a[0] < b[0] ? -1 : 1));
+    d.add(`## ${prose(ctx.settings.extensions?.[name]?.label ?? defaultLabel(name, 'permission'), 80)}`, `From ${code(name)} in the API description.`);
+    d.add(table(['Permission', 'Operations'], rows.map(([perm, ops]) => [code(perm), `${ops.slice(0, 4).map(opLink).join(', ')}${ops.length > 4 ? ` and ${ops.length - 4} more` : ''}`])));
+  }
+  d.gaps.push('The spec names permissions but does not say how a caller is given one. Add that.');
+  return d.finish('permissions', 'concept', 'Permissions', `The permissions ${meta(ctx.model.title, 120)} names, and which operations need each.`);
 }
 
 export function paginationPage(ctx: Ctx): Result {
@@ -443,8 +515,8 @@ export function webhooksPage(ctx: Ctx): Result {
 /** A step is named as the spec names the operation ("Book a visit"), and generically only when it has no summary. */
 const stepTitle = (op: Operation, fallback: string) => attr(op.summary ?? '', 80) || attr(fallback);
 
-function step(d: Doc, title: string, op: Operation, built: BuiltValues, capture?: [string, string], after?: string): void {
-  d.add(`<Step title="${stepTitle(op, title)}">`, opIntro(op));
+function step(ctx: Ctx, d: Doc, title: string, op: Operation, built: BuiltValues, capture?: [string, string], after?: string): void {
+  d.add(`<Step title="${stepTitle(op, title)}">`, opIntro(ctx, op));
   d.sample(op, built, { capture });
   d.add(after, '</Step>');
 }
@@ -465,6 +537,7 @@ function prerequisiteBlock(d: Doc, ctx: Ctx, pre: PrereqState): void {
     const one = singular(p.resource.noun);
     d.add(`<Step title="${stepTitle(p.op, `Create ${article(one)}`)}">`);
     d.add(`${opLink(p.neededBy)} refers to ${article(one)} by ${code(p.field)}. Call ${opLink(p.op)} to create one.`);
+    d.add(...extensionLines(ctx, p.op));
     d.sample(p.op, p.built, { capture: [p.variable, p.idPath] });
     d.add(`The identifier is at ${code(p.idPath)} in the response. Later steps send it as ${code(p.field)}.`);
     const guide = `${p.resource.slug}/manage`;
@@ -540,11 +613,11 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
   prerequisiteBlock(d, ctx, pre);
   if (pre.steps.length) d.add(`## ${capitalize(source === 'create' ? `create the ${one}, then ${list} it` : `list ${r.noun}`)}`);
   d.add('<Steps>');
-  d.add(`<Step title="${stepTitle(firstOp, source === 'create' ? `Create ${article(one)}` : `List ${r.noun}`)}">`, opIntro(firstOp));
+  d.add(`<Step title="${stepTitle(firstOp, source === 'create' ? `Create ${article(one)}` : `List ${r.noun}`)}">`, opIntro(ctx, firstOp));
   d.sample(firstOp, first, { capture: [variable, path] });
   d.response(model, firstOp);
   d.add(`The identifier is at ${code(path)} in the response. The following steps send it as ${code(r.idParam)}.`, '</Step>');
-  for (const [title, op, built] of follow) step(d, title, op, built);
+  for (const [title, op, built] of follow) step(ctx, d, title, op, built);
   d.add('</Steps>');
 
   const manages = verbs.includes('update') || verbs.includes('delete');
@@ -576,18 +649,18 @@ export function nestedTutorial(ctx: Ctx, parent: Resource, child: Resource): Res
   prerequisiteBlock(d, ctx, pre);
   if (pre.steps.length) d.add(`## ${capitalize(`create the ${pOne} and add ${article(cOne)}`)}`);
   d.add('<Steps>');
-  step(d, `Create ${article(pOne)}`, parent.create, pBuilt, [pVar, pPath], `The identifier is at ${code(pPath)} in the response.`);
+  step(ctx, d, `Create ${article(pOne)}`, parent.create, pBuilt, [pVar, pPath], `The identifier is at ${code(pPath)} in the response.`);
 
   let cVar = idVariable(child);
   if (cVar === pVar) cVar = `${cOne.replace(/[^a-z0-9]+/g, '_')}_${cVar}`;
   const cPath = child.idParam && child.idParam !== parent.idParam ? idPathInResponse(model, child.create, child.idParam) : undefined;
   const getChild = cPath && ok(child.get) ? buildValues(model, checker, child.get, { ...bind, [child.idParam!]: `{{${cVar}}}` }) : undefined;
-  step(d, `Add ${article(cOne)}`, child.create, cBuilt, getChild?.ok ? [cVar, cPath!] : undefined);
+  step(ctx, d, `Add ${article(cOne)}`, child.create, cBuilt, getChild?.ok ? [cVar, cPath!] : undefined);
   if (ok(child.list)) {
     const b = buildValues(model, checker, child.list, bind);
-    if (b.ok) step(d, `List the ${child.noun}`, child.list, b);
+    if (b.ok) step(ctx, d, `List the ${child.noun}`, child.list, b);
   }
-  if (getChild?.ok) step(d, `Retrieve the ${cOne}`, child.get!, getChild);
+  if (getChild?.ok) step(ctx, d, `Retrieve the ${cOne}`, child.get!, getChild);
   d.add('</Steps>');
   const page = d.finish(slug, 'tutorial', `Create ${article(pOne)} with ${child.noun}`.slice(0, 80), `Create ${article(pOne)}, then add ${child.noun} to it, carrying identifiers from one call to the next.`.slice(0, 200));
   page.group = parent.tag;
@@ -640,8 +713,8 @@ export function actionPages(ctx: Ctx, r: Resource): Result[] {
     prerequisiteBlock(d, ctx, pre);
     if (pre.steps.length) d.add(`## ${prose(title)}`);
     d.add('<Steps>');
-    step(d, `Create ${article(one)}`, r.create, made, [variable, idPath], `The identifier is at ${code(idPath)} in the response. The next step sends it as ${code(r.idParam)}.`);
-    d.add(`<Step title="${stepTitle(op, title)}">`, opIntro(op));
+    step(ctx, d, `Create ${article(one)}`, r.create, made, [variable, idPath], `The identifier is at ${code(idPath)} in the response. The next step sends it as ${code(r.idParam)}.`);
+    d.add(`<Step title="${stepTitle(op, title)}">`, opIntro(ctx, op));
     d.sample(op, built);
     d.response(model, op);
     d.add('</Step>', '</Steps>');
