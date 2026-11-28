@@ -169,7 +169,9 @@ function extensionLines(ctx: Ctx, op: Operation): string[] {
     if (!setting || setting.role === 'ignore' || setting.role === 'errors') continue;
     const values = textValues(value);
     if (values === undefined || value === false) continue;
-    const label = prose(setting.label ?? defaultLabel(name, setting.role), 80);
+    const words = prose(setting.label ?? defaultLabel(name, setting.role), 80);
+    // A permission line leads to the page that lists every permission.
+    const label = setting.role === 'permission' && ctx.has('permissions') ? `[${words}](guide:permissions)` : words;
     if (values.length === 0) {
       if (value === true) out.push(`**${label}.**`);
       continue;
@@ -343,7 +345,7 @@ export function quickstartPage(ctx: Ctx): Result {
   const next: [string, string, string][] = [];
   for (const [slug, title, text] of [
     ['authentication', 'Authentication', 'How credentials are sent.'],
-    ['errors', 'Errors', 'The error responses the API documents.'],
+    ['errors', 'Errors', 'How calls fail, and what the API says about it.'],
     ['pagination', 'Pagination', 'How to page through lists.'],
   ] as const) {
     if (ctx.has(slug)) next.push([slug, title, text]);
@@ -420,7 +422,8 @@ export function permissionsPage(ctx: Ctx): Result {
   for (const { name, byValue } of found) {
     const rows = [...byValue].sort((a, b) => (a[0] < b[0] ? -1 : 1));
     d.add(`## ${prose(ctx.settings.extensions?.[name]?.label ?? defaultLabel(name, 'permission'), 80)}`, `From ${code(name)} in the API description.`);
-    d.add(table(['Permission', 'Operations'], rows.map(([perm, ops]) => [code(perm), `${ops.slice(0, 4).map(opLink).join(', ')}${ops.length > 4 ? ` and ${ops.length - 4} more` : ''}`])));
+    // Every operation is listed: the page is for checking whether one operation needs a permission.
+    d.add(table(['Permission', 'Operations'], rows.map(([perm, ops]) => [code(perm), ops.map(opLink).join(', ')])));
   }
   d.gaps.push('The spec names permissions but does not say how a caller is given one. Add that.');
   return d.finish('permissions', 'concept', 'Permissions', `The permissions ${meta(ctx.model.title, 120)} names, and which operations need each.`);

@@ -552,8 +552,8 @@ test('an extension given a role is shown in the spec\'s own words', () => {
   const a = generate(JSON.stringify(extSpec()), { manifestSchema, reportSchema, settings });
   assert.deepEqual(errorsOf(a.validation), []);
   const page = text(a.files.get('pages/things/manage.md')!);
-  assert.match(page, /\*\*Permission needed:\*\* `thing\.manage`\./);
-  assert.match(page, /\*\*May also need:\*\* `price\.override`, `tax\.override`\./);
+  assert.match(page, /\*\*\[Permission needed\]\(guide:permissions\):\*\* `thing\.manage`\./);
+  assert.match(page, /\*\*\[May also need\]\(guide:permissions\):\*\* `price\.override`, `tax\.override`\./);
   assert.match(page, /\*\*Feature that must be on:\*\* `things`\./);
   assert.match(page, /\*\*Safe to repeat\.\*\*/);
   assert.match(page, /\*\*Note:\*\* An agent key needs \\\{\\\{api\\_key\\\}\\\} a person\./, 'extension text is sanitized like any spec text');
