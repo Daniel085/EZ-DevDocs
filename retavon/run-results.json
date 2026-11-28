@@ -1,0 +1,929 @@
+{
+ "ranOn": "2026-11-28",
+ "bundle": "generator 0.3.0, one commit before the placeholder notice",
+ "pages": 236,
+ "passedAsWritten": [
+  "files/manage",
+  "journal-entries/browse",
+  "pagination",
+  "quickstart",
+  "receipts/browse",
+  "tax-exemption-certificates/browse",
+  "water-tests/browse"
+ ],
+ "passedAfterVarying": [
+  "brands/manage",
+  "cash-paid-reasons/manage",
+  "categories/manage",
+  "customers/account-payments",
+  "customers/tax-exemption-certificates",
+  "delivery-failure-reasons/manage",
+  "equipment/manage",
+  "equipment-components/manage",
+  "equipment-components/replace",
+  "floor-plan-lenders/manage",
+  "follow-ups/cancel",
+  "follow-ups/manage",
+  "item-styles/manage",
+  "item-styles/values",
+  "items/images",
+  "items/manage",
+  "items/option-groups",
+  "items/vendors",
+  "label-layouts/manage",
+  "lead-sources/manage",
+  "lead-sources/stop-intake",
+  "leads/activities",
+  "leads/lost",
+  "locations/hours",
+  "locations/manage",
+  "order-charges/manage",
+  "outside-party-roles/manage",
+  "packages/components",
+  "packages/manage",
+  "parcel-carriers/manage",
+  "parcel-service-levels/manage",
+  "payment-methods/manage",
+  "price-lists/manage",
+  "price-lists/prices",
+  "recalls/find-units",
+  "recalls/manage",
+  "registers/manage",
+  "sales-orders/cancel",
+  "sales-orders/charges",
+  "sales-orders/manage",
+  "sales-orders/reopen",
+  "sales-orders/reprice",
+  "serialized-units/manage",
+  "serialized-units/price",
+  "serialized-units/write-down",
+  "sites/manage",
+  "stock-adjustment-reasons/manage",
+  "stock-counts/cancel",
+  "stock-counts/manage",
+  "stock-counts/post",
+  "subscriptions/lines",
+  "subscriptions/manage",
+  "subscriptions/skip-missed",
+  "tax-classes/manage",
+  "tax-exemption-reasons/manage",
+  "tax-jurisdictions/manage",
+  "tax-jurisdictions/rates",
+  "tutorials/categories-price-change",
+  "tutorials/customers-legal-holds",
+  "tutorials/customers-notes",
+  "tutorials/customers-price-lists",
+  "tutorials/sales-orders-lines",
+  "tutorials/sales-orders-packages",
+  "tutorials/work-orders-tasks",
+  "unit-conditions/manage",
+  "vendors/manage",
+  "visit-resources/manage",
+  "warranties/manage",
+  "warranty-plans/manage",
+  "water-bodies/manage",
+  "water-bodies/tests",
+  "work-orders/approvals",
+  "work-orders/cancel",
+  "work-orders/checks",
+  "work-orders/complete",
+  "work-orders/manage",
+  "work-orders/parts-expected"
+ ],
+ "nothingToList": [
+  "card-charges/browse",
+  "card-payouts/browse",
+  "cash-drawers/browse",
+  "customer-replies/browse",
+  "entitlements/browse",
+  "finance-charges/browse",
+  "financing-applications/browse",
+  "lab-samples/browse",
+  "message-templates/browse",
+  "messages/browse",
+  "rota-notices/browse",
+  "rota-offers/browse",
+  "statements/browse",
+  "stock-lots/browse",
+  "stock-transfer-batches/browse",
+  "warranty-terms/browse"
+ ],
+ "failed": [
+  {
+   "page": "accounts/manage",
+   "operation": "updateLedgerAccount",
+   "status": 409,
+   "why": "conflict: Another account already goes to the accounting system under this name, and two accounts under one name would post there as one. Give this account a name of its own in the accounting system (export_name), or ren"
+  },
+  {
+   "page": "accounts/writes-checks",
+   "operation": "setCheckWritingAccount",
+   "status": 400,
+   "why": "validation_failed: Checks are written only on an active bank account. Send an active account with is_bank_account true."
+  },
+  {
+   "page": "checklists/manage",
+   "operation": "createChecklist",
+   "status": 422,
+   "why": "invalid_reference: requires_party_role_id is not the id of an outside_party_role."
+  },
+  {
+   "page": "commission-plans/manage",
+   "operation": "createCommissionPlan",
+   "status": 422,
+   "why": "invalid_reference: item_category_id is not the id of an item_category."
+  },
+  {
+   "page": "custom-fields/manage",
+   "operation": "createCustomField",
+   "status": 400,
+   "why": "validation_failed: The body is invalid and nothing was changed. body/about_type: Invalid option: expected one of \"customer\"|\"equipment\"|\"item\"|\"purchase_order\"|\"sales_order\"|\"serialized_unit\"|\"site\"|\"subscription\"|\"vendo"
+  },
+  {
+   "page": "customers/manage",
+   "operation": "updateCustomer",
+   "status": 422,
+   "why": "invalid_reference: salesperson_staff_member_id \"<id>\" is not the id of a staff_member."
+  },
+  {
+   "page": "customers/merge",
+   "operation": "mergeCustomers",
+   "status": 403,
+   "why": "forbidden: mergeCustomers by an agent key is put to a person here, and nothing was changed. An agent key's change to how a customer is reached, who they are, or where reports go waits for a person's yes. The business has"
+  },
+  {
+   "page": "customers/store-credit",
+   "operation": "giveStoreCredit",
+   "status": 403,
+   "why": "forbidden: giveStoreCredit by an agent key is put to a person here, and nothing was changed. Money an agent key gives back or away waits for a person's yes. The business has agents propose it (policy agent_money: propose"
+  },
+  {
+   "page": "customers/unclaimed-credit",
+   "operation": "reportUnclaimedCredit",
+   "status": 422,
+   "why": "rule_violated: Unclaimed property waits in a liability account of the business's own still in use, for example Unclaimed Property Payable, until it is paid to the state, not one the system posts its own events to; XBV7JR"
+  },
+  {
+   "page": "decisions/conditions",
+   "operation": "raiseDecision",
+   "status": 400,
+   "why": "validation_failed: This key acts for nobody, so name the person to decide (owner_staff_member_id)."
+  },
+  {
+   "page": "decisions/decide",
+   "operation": "raiseDecision",
+   "status": 400,
+   "why": "validation_failed: This key acts for nobody, so name the person to decide (owner_staff_member_id)."
+  },
+  {
+   "page": "decisions/decline",
+   "operation": "raiseDecision",
+   "status": 400,
+   "why": "validation_failed: This key acts for nobody, so name the person to decide (owner_staff_member_id)."
+  },
+  {
+   "page": "decisions/manage",
+   "operation": "raiseDecision",
+   "status": 400,
+   "why": "validation_failed: This key acts for nobody, so name the person to decide (owner_staff_member_id)."
+  },
+  {
+   "page": "decisions/pass",
+   "operation": "raiseDecision",
+   "status": 400,
+   "why": "validation_failed: This key acts for nobody, so name the person to decide (owner_staff_member_id)."
+  },
+  {
+   "page": "decisions/withdraw",
+   "operation": "raiseDecision",
+   "status": 400,
+   "why": "validation_failed: This key acts for nobody, so name the person to decide (owner_staff_member_id)."
+  },
+  {
+   "page": "deliveries/complete",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "deliveries/fail",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "deliveries/lines",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "deliveries/manage",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "deliveries/outside-parties",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "deliveries/parts",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "deliveries/redelivery",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "deliveries/site-override",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "dosing-rules/manage",
+   "operation": "createDosingRule",
+   "status": 400,
+   "why": "validation_failed: The body is invalid and nothing was changed. body/parameter: Invalid option: expected one of \"total_alkalinity\"|\"ph\"|\"calcium_hardness\"|\"cyanuric_acid\"|\"free_chlorine\"|\"bromine\"|\"salt\" body/direction: "
+  },
+  {
+   "page": "financing-lenders/fundings",
+   "operation": "createFinancingLender",
+   "status": 422,
+   "why": "invalid_reference: deposit_account_id \"<id>\" is not the id of a ledger_account."
+  },
+  {
+   "page": "financing-lenders/manage",
+   "operation": "createFinancingLender",
+   "status": 422,
+   "why": "invalid_reference: deposit_account_id \"<id>\" is not the id of a ledger_account."
+  },
+  {
+   "page": "financing-lenders/promotions",
+   "operation": "createFinancingLender",
+   "status": 422,
+   "why": "invalid_reference: deposit_account_id \"<id>\" is not the id of a ledger_account."
+  },
+  {
+   "page": "floor-plan-units/manage",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "floor-plan-units/payments",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "floor-plan-units/void",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "follow-ups/complete",
+   "operation": "completeFollowUp",
+   "status": 400,
+   "why": "validation_failed: This follow-up has no lead to log an activity on. Leave activity out; the customer's own record is the place for what came of it."
+  },
+  {
+   "page": "gift-cards/manage",
+   "operation": "sellGiftCard",
+   "status": 422,
+   "why": "rule_violated: A check is taken with its number, so the deposit slip and the bank statement can be matched, and this one has none. Send the check's number in reference."
+  },
+  {
+   "page": "gift-cards/replace",
+   "operation": "sellGiftCard",
+   "status": 422,
+   "why": "rule_violated: A check is taken with its number, so the deposit slip and the bank statement can be matched, and this one has none. Send the check's number in reference."
+  },
+  {
+   "page": "gift-cards/reverse",
+   "operation": "sellGiftCard",
+   "status": 422,
+   "why": "rule_violated: A check is taken with its number, so the deposit slip and the bank statement can be matched, and this one has none. Send the check's number in reference."
+  },
+  {
+   "page": "gift-cards/void",
+   "operation": "sellGiftCard",
+   "status": 422,
+   "why": "rule_violated: A check is taken with its number, so the deposit slip and the bank statement can be matched, and this one has none. Send the check's number in reference."
+  },
+  {
+   "page": "gift-cards/write-off",
+   "operation": "sellGiftCard",
+   "status": 422,
+   "why": "rule_violated: A check is taken with its number, so the deposit slip and the bank statement can be matched, and this one has none. Send the check's number in reference."
+  },
+  {
+   "page": "gratuities-shares/manage",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "imports/check",
+   "operation": "stageImport",
+   "status": 400,
+   "why": "validation_failed: The file is image/png, not a CSV file (text/csv)."
+  },
+  {
+   "page": "imports/commit",
+   "operation": "stageImport",
+   "status": 400,
+   "why": "validation_failed: The file is image/png, not a CSV file (text/csv)."
+  },
+  {
+   "page": "imports/manage",
+   "operation": "stageImport",
+   "status": 400,
+   "why": "validation_failed: The file is image/png, not a CSV file (text/csv)."
+  },
+  {
+   "page": "items/fitment",
+   "operation": "addItemFitment",
+   "status": 422,
+   "why": "invalid_reference: fits_item_id \"<id>\" is not the id of an item."
+  },
+  {
+   "page": "items/packs",
+   "operation": "setItemPack",
+   "status": 422,
+   "why": "rule_violated: Item HS-GRANDEE-2026-MI7M829739 (Hot Spring Grandee 2026) is tracked by serial number, one unit at a time, so it is not bought or sold in packs."
+  },
+  {
+   "page": "job-templates/manage",
+   "operation": "createJobTemplate",
+   "status": 422,
+   "why": "rule_violated: Item HS-GRANDEE-2026-MI7M640979 (Hot Spring Grandee 2026) is a good, so it is a part (included_part or suggested_part), not a charge."
+  },
+  {
+   "page": "journal-exports/manage",
+   "operation": "createJournalExport",
+   "status": 422,
+   "why": "rule_violated: Nothing to export through 2026-11-26: every entry dated on or before it is already in a batch. Entries dated later can be exported once their day is over at every location (the next day to export through i"
+  },
+  {
+   "page": "lead-sources/intake-token",
+   "operation": "issueLeadSourceIntakeToken",
+   "status": 422,
+   "why": "rule_violated: Only an active lead source of kind web takes leads from a form; HOMESHOW-26-MI7M579211 is show and active."
+  },
+  {
+   "page": "leads/manage",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "leads/reopen",
+   "operation": "reopenLead",
+   "status": 409,
+   "why": "conflict: Lead 1008 is open already."
+  },
+  {
+   "page": "promotions/manage",
+   "operation": "createPromotion",
+   "status": 422,
+   "why": "invalid_reference: buy_item_id is not the id of an item."
+  },
+  {
+   "page": "purchase-orders/approve",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M881537 from Hot Spring Spas mi7m580498: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/cancel",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M166802 from Hot Spring Spas mi7m91522: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/close",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M733422 from Hot Spring Spas mi7m777824: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/drop-shipments",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M617436 from Hot Spring Spas mi7m455547: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/landed-costs",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M899380 from Hot Spring Spas mi7m386235: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/manage",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M746922 from Hot Spring Spas mi7m613213: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/receipts",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M204185 from Hot Spring Spas mi7m775518: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/reopen",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M381766 from Hot Spring Spas mi7m926284: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "purchase-orders/returns",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M285104 from Hot Spring Spas mi7m357505: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "registers/cash-drawers",
+   "operation": "openCashDrawer",
+   "status": 422,
+   "why": "rule_violated: The safe at Boise Showroom does not hold $200.00 by its records, so that float cannot come out of it. Open the drawer with a smaller float, or ask a manager to put cash in the safe first."
+  },
+  {
+   "page": "report-views/delete",
+   "operation": "createReportView",
+   "status": 422,
+   "why": "rule_violated: This key acts for no staff member, so it has no views of its own to keep. Use a key that acts for a person, or work on a shared view (shared: true), which needs staff.manage for the whole business."
+  },
+  {
+   "page": "report-views/manage",
+   "operation": "createReportView",
+   "status": 422,
+   "why": "rule_violated: This key acts for no staff member, so it has no views of its own to keep. Use a key that acts for a person, or work on a shared view (shared: true), which needs staff.manage for the whole business."
+  },
+  {
+   "page": "roles/manage",
+   "operation": "createRole",
+   "status": 403,
+   "why": "forbidden: createRole by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (policy a"
+  },
+  {
+   "page": "sales-orders/container-returns",
+   "operation": "returnContainers",
+   "status": 422,
+   "why": "rule_violated: Order 1032 is a quote: containers come back on an open or completed order, which can be credited what their deposits were taken at."
+  },
+  {
+   "page": "sales-orders/credits",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "sales-orders/fulfilments",
+   "operation": "fulfilSalesOrder",
+   "status": 422,
+   "why": "rule_violated: Order 1034 is quote. Only an open order can have goods handed over."
+  },
+  {
+   "page": "sales-orders/open",
+   "operation": "openSalesOrder",
+   "status": 422,
+   "why": "rule_violated: Quote 1036 expired on 2026-10-31, so its prices no longer hold: it is not opened, signed or paid toward until they are agreed again. Check the prices with the customer and set a new expires_on first."
+  },
+  {
+   "page": "sales-orders/parcels",
+   "operation": "shipOrderParcel",
+   "status": 422,
+   "why": "rule_violated: Order 1037 is quote. Only an open order has goods to send."
+  },
+  {
+   "page": "sales-orders/payment-schedule",
+   "operation": "setPaymentSchedule",
+   "status": 422,
+   "why": "rule_violated: The first installment of order 1038 is due on Mar 4, 2026, before the order's date of Nov 27, 2026: it is the deposit that opens the order, due on or after its date."
+  },
+  {
+   "page": "sales-orders/payments",
+   "operation": "takePayment",
+   "status": 422,
+   "why": "rule_violated: Order 1039 is still a quote, so it takes no money yet. Open it once the customer agrees, then take the payment."
+  },
+  {
+   "page": "sales-orders/ready-for-pickup",
+   "operation": "markOrderReadyForPickup",
+   "status": 422,
+   "why": "rule_violated: Order 1040 is not one placed online to be collected at a store."
+  },
+  {
+   "page": "sales-orders/receipts",
+   "operation": "issueReceipt",
+   "status": 422,
+   "why": "rule_violated: Everything on order 1041 is already on a receipt (or is a payment reversed, which goes on none), so a new receipt would show nothing. Print the receipt again for a copy, or take a payment or hand goods ove"
+  },
+  {
+   "page": "sales-orders/refunds",
+   "operation": "refundPayment",
+   "status": 403,
+   "why": "forbidden: refundPayment by an agent key is put to a person here, and nothing was changed. Money an agent key gives back or away waits for a person's yes. The business has agents propose it (policy agent_money: proposed)"
+  },
+  {
+   "page": "sales-orders/returns",
+   "operation": "returnSalesOrderGoods",
+   "status": 422,
+   "why": "invalid_reference: This order has no line with id <id>."
+  },
+  {
+   "page": "site-checks/manage",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "sites/owner",
+   "operation": "createEquipment",
+   "status": 422,
+   "why": "invalid_reference: customer_id and site_id do not together name a site. The site site_id names belongs to another customer, or site_id is wrong: check each id."
+  },
+  {
+   "page": "staff/manage",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "staff/roles",
+   "operation": "createRole",
+   "status": 403,
+   "why": "forbidden: createRole by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (policy a"
+  },
+  {
+   "page": "stock-builds/manage",
+   "operation": "recordBuild",
+   "status": 422,
+   "why": "rule_violated: Item HS-GRANDEE-2026-MI7M938018 is tracked by serial number: move one unit at a time (quantity 1 or -1) and name it in serialized_unit_id."
+  },
+  {
+   "page": "stock-builds/unbuild",
+   "operation": "recordBuild",
+   "status": 422,
+   "why": "rule_violated: Item HS-GRANDEE-2026-MI7M408686 is tracked by serial number: move one unit at a time (quantity 1 or -1) and name it in serialized_unit_id."
+  },
+  {
+   "page": "stock-counts/lines",
+   "operation": "recordStockCount",
+   "status": 422,
+   "why": "rule_violated: Item HS-GRANDEE-2026-MI7M957362 is not tracked by quantity, so it cannot go on a stock count."
+  },
+  {
+   "page": "stock-counts/reasons",
+   "operation": "explainStockCount",
+   "status": 404,
+   "why": "not_found: Item <id> has not been counted on this count, so there is nothing to explain."
+  },
+  {
+   "page": "stock-counts/units",
+   "operation": "recordStockCountUnits",
+   "status": 422,
+   "why": "rule_violated: This stock count does not cover serialized units, so serial numbers are not scanned on it. Count the units on a count that covers them."
+  },
+  {
+   "page": "subscriptions/orders",
+   "operation": "makeSubscriptionOrder",
+   "status": 422,
+   "why": "rule_violated: The next cycle of subscription \"Valet Care Diamond\" is due 2026-10-05, not 2026-11-02. Read next_due_on and ask for that cycle."
+  },
+  {
+   "page": "tasks/accept",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tasks/cancel",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tasks/complete",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tasks/decline",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tasks/manage",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tasks/pass",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tasks/release",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tasks/return",
+   "operation": "giveTask",
+   "status": 422,
+   "why": "invalid_reference: This key cannot read sales order <id> (404: No sales order with id <id>.), so it cannot name it. Name a record this key may read."
+  },
+  {
+   "page": "tax-areas/manage",
+   "operation": "createTaxArea",
+   "status": 409,
+   "why": "conflict: 83340 is already taxed in Ketchum. Take it off that area first."
+  },
+  {
+   "page": "time-off/approve",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "time-off/decline",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "time-off/manage",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "time-off/withdraw",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "timekeeping-shifts/manage",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "trade-ins/cancel",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "trade-ins/dispose",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "trade-ins/give-back",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "trade-ins/manage",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "trade-ins/price",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "trade-ins/receive",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "tutorials/customers-contact-points",
+   "operation": "addContactPoint",
+   "status": 403,
+   "why": "forbidden: addContactPoint by an agent key is put to a person here, and nothing was changed. An agent key's change to how a customer is reached, who they are, or where reports go waits for a person's yes. The business ha"
+  },
+  {
+   "page": "tutorials/locations-bank-deposits",
+   "operation": "recordBankDeposit",
+   "status": 422,
+   "why": "rule_violated: A bank deposit goes into the bank account it is deposited in, or Undeposited Funds (1050) when the accounting system records the deposit itself, not MZUR6W Advertising and Promotions mi7m907817."
+  },
+  {
+   "page": "tutorials/purchase-orders-documents",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M236304 from Hot Spring Spas mi7m224104: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "tutorials/purchase-orders-lines",
+   "operation": "createPurchaseOrder",
+   "status": 422,
+   "why": "rule_violated: No pack is on record for item HS-GRANDEE-2026-MI7M807405 from Hot Spring Spas mi7m64841: send quantity in the item's unit (each), or record the vendor's pack first."
+  },
+  {
+   "page": "tutorials/timekeeping-shifts-breaks",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "tutorials/warranty-claims-failed-parts",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "unit-components/manage",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "unit-components/replace",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "unit-loans/extend",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "unit-loans/manage",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "unit-loans/return",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "vendor-invoices/manage",
+   "operation": "recordVendorInvoice",
+   "status": 422,
+   "why": "invalid_reference: Line 1: no purchase receipt with id <id>."
+  },
+  {
+   "page": "vendor-invoices/void",
+   "operation": "recordVendorInvoice",
+   "status": 422,
+   "why": "invalid_reference: Line 1: no purchase receipt with id <id>."
+  },
+  {
+   "page": "visit-plans/manage",
+   "operation": "makeVisitPlan",
+   "status": 422,
+   "why": "invalid_reference: No subscription with id <id>."
+  },
+  {
+   "page": "visits/cancel",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "visits/checks",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "visits/complete",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "visits/crew",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "visits/fail",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "visits/manage",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "visits/photos",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "warranty-claims/close-short",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "warranty-claims/lines",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "warranty-claims/manage",
+   "operation": "createItem",
+   "status": 422,
+   "why": "invalid_reference: brand_id \"<id>\" is not the id of a brand."
+  },
+  {
+   "page": "warranty-registries/manage",
+   "operation": "createRegistry",
+   "status": 422,
+   "why": "invalid_reference: item_category_id \"<id>\" is not the id of an item_category."
+  },
+  {
+   "page": "work-orders/approval-requests",
+   "operation": "requestWorkOrderApproval",
+   "status": 422,
+   "why": "invalid_reference: Contact point <id> is not one of the customer's email addresses or phone numbers in use."
+  },
+  {
+   "page": "work-orders/bill-labor",
+   "operation": "billWorkOrderLabor",
+   "status": 422,
+   "why": "rule_violated: Work order 1024 is open: its time is charged as its visits or the job are completed."
+  },
+  {
+   "page": "work-orders/charges",
+   "operation": "addWorkOrderCharges",
+   "status": 422,
+   "why": "rule_violated: HS-GRANDEE-2026-MI7M578203 (Hot Spring Grandee 2026) is a part, and this order charges work order 1026: a part used on a job is recorded as used, which hands it over from where it came."
+  },
+  {
+   "page": "work-orders/labor",
+   "operation": "recordLaborTime",
+   "status": 400,
+   "why": "validation_failed: This key acts for no staff member, so say whose time it is (staff_member_id)."
+  },
+  {
+   "page": "work-orders/parts",
+   "operation": "recordPartsUsed",
+   "status": 422,
+   "why": "rule_violated: Line 1 of order 1049 is for a serial-tracked item: set serialized_unit_id on the line before handing it over."
+  },
+  {
+   "page": "work-orders/photos",
+   "operation": "addWorkOrderPhotos",
+   "status": 422,
+   "why": "rule_violated: This file is already attached to another customer's record, so it cannot be attached to this customer's. Upload this customer's own file."
+  },
+  {
+   "page": "work-orders/sign-offs",
+   "operation": "signWorkOrder",
+   "status": 422,
+   "why": "invalid_reference: file_id is not the id of a file."
+  },
+  {
+   "page": "work-orders/visits",
+   "operation": "createStaffMember",
+   "status": 403,
+   "why": "forbidden: createStaffMember by an agent key is put to a person here, and nothing was changed. An agent key's change to who works here or what anyone may do waits for a person's yes. The business has agents propose it (p"
+  },
+  {
+   "page": "zones/manage",
+   "operation": "createZone",
+   "status": 422,
+   "why": "rule_violated: Store Boise Showroom has no coordinates, so zone Within 3 miles cannot be reckoned by a radius from it. Give the store its latitude and longitude first, or list the zone's postal codes instead."
+  }
+ ]
+}
