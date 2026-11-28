@@ -1,0 +1,16 @@
+{
+  "extensions": {
+    "x-errors": { "role": "errors", "label": "Errors each operation can return" },
+    "x-feature": { "role": "requires", "label": "Feature that must be on" },
+    "x-required-permission": { "role": "permission", "label": "Permission needed" },
+    "x-checks-within": { "role": "permission", "label": "Permission checked, by location or by what is sent" },
+    "x-agent-proposes": { "role": "note", "label": "With an agent key, a person must approve this, under the policy" },
+    "x-idempotent": { "role": "note", "label": "Safe to repeat" },
+    "x-moves": { "role": "note", "label": "Moves" },
+    "x-changes-nothing": { "role": "note", "label": "Changes nothing" },
+    "x-money": { "role": "ignore" },
+    "x-natural-key": { "role": "ignore" },
+    "x-outsider-written": { "role": "ignore" },
+    "x-response-fields": { "role": "ignore" }
+  }
+}
