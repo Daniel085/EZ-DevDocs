@@ -3,6 +3,7 @@
 
 import { findResources } from './analyze.ts';
 import { auditSpec, renderAudit, type AuditFinding } from './audit.ts';
+import { checkSettings, inventoryExtensions, type ExtensionInfo, type Settings } from './extensions.ts';
 import {
   actionPages,
   authenticationPage,
@@ -11,6 +12,7 @@ import {
   isPage,
   nestedTutorial,
   paginationPage,
+  permissionsPage,
   quickstartPage,
   rateLimitsPage,
   resourcePage,
@@ -38,6 +40,8 @@ export interface GenerateOptions {
    * it is emitted byte for byte as given; so is a page a person added, and a navigation they edited.
    */
   existing?: BundleFiles;
+  /** Choices for this build, such as what to do with each vendor extension. An input like the spec: the same settings give the same bytes. */
+  settings?: Settings;
 }
 
 export interface ReportPage {
@@ -75,6 +79,8 @@ export interface RunReport {
   gaps: { page?: string; message: string }[];
   /** What the owner of the spec should fix, most serious first. */
   specProblems: SpecProblem[];
+  /** Every vendor extension in the spec, with the role this build gave it and the role its name suggests. */
+  extensions: ExtensionInfo[];
   /** SHA-256 of the navigation as this module wrote it. Absent when a person's navigation was kept. */
   navSha256?: string;
   /** Entries left out to stay inside the report's limits. */
@@ -92,7 +98,7 @@ export interface GenerateResult {
 }
 
 function build(ctx: Ctx): Result[] {
-  const results: Result[] = [quickstartPage(ctx), authenticationPage(ctx), errorsPage(ctx), paginationPage(ctx), idempotencyPage(ctx), rateLimitsPage(ctx), webhooksPage(ctx)];
+  const results: Result[] = [quickstartPage(ctx), authenticationPage(ctx), errorsPage(ctx), permissionsPage(ctx), paginationPage(ctx), idempotencyPage(ctx), rateLimitsPage(ctx), webhooksPage(ctx)];
   for (const r of ctx.resources) {
     if (!r.itemPath) continue;
     results.push(resourcePage(ctx, r));
@@ -238,6 +244,9 @@ export class GenerationError extends Error {}
 
 export function generate(spec: string | Uint8Array, options: GenerateOptions): GenerateResult {
   const model = loadSpec(spec);
+  const problems = checkSettings(options.settings);
+  if (problems.length) throw new GenerationError(`The settings are not usable: ${problems.join(' ')}`);
+  const settings: Settings = options.settings ?? {};
   const checker = new SchemaChecker(model);
   const resources = findResources(model);
   const prev = readExisting(options.existing);
@@ -256,7 +265,7 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
   let exists: Set<string> | undefined;
   let navKept = false;
   for (let round = 0; round < 6; round++) {
-    const results = build({ model, checker, resources, has: (slug) => prev.kept.has(slug) || ((exists ? exists.has(slug) : true) && !dropped.has(slug)) });
+    const results = build({ model, checker, resources, settings, has: (slug) => prev.kept.has(slug) || ((exists ? exists.has(slug) : true) && !dropped.has(slug)) });
     pages = results.filter(isPage).filter((p) => !dropped.has(p.slug));
     skipped = results.filter((r): r is Skipped => !isPage(r));
     if (pages.length === 0 && prev.kept.size === 0) break;
@@ -286,6 +295,7 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
 
   // --- The run report, which is part of the bundle
   const audit = auditSpec(model);
+  const extensions = inventoryExtensions(model, settings);
   const bySlug = new Map(pages.map((p) => [p.slug, p]));
   const skipReason = new Map(skipped.map((s) => [s.page, s.reason]));
   const reportPages: ReportPage[] = [];
@@ -318,6 +328,7 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
       subjects: f.subjects.slice(0, 200),
       ...(f.subjects.length > 200 ? { subjectsOmitted: f.subjects.length - 200 } : {}),
     })),
+    extensions,
     ...(navKept ? {} : { navSha256: sha256(JSON.stringify(bundle.manifest.nav)) }),
     ...(omitted.pages || omitted.gaps ? { omitted } : {}),
   };
@@ -325,7 +336,7 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
   // Put the files in a fixed order, so that writing them does not depend on how they were built.
   const files: BundleFiles = new Map([...bundle.files].sort(([a], [b]) => compareCodePoints(a, b)));
   validation = validate(files);
-  const auditMarkdown = renderAudit(model, audit, { pages: out.length, skipped: reportPages.filter((p) => p.outcome === 'skipped').length, operationsInGuides: new Set(pages.flatMap((p) => p.operations)).size });
+  const auditMarkdown = renderAudit(model, audit, extensions, { pages: out.length, skipped: reportPages.filter((p) => p.outcome === 'skipped').length, operationsInGuides: new Set(pages.flatMap((p) => p.operations)).size });
   return { files, manifest: bundle.manifest, report, validation, auditMarkdown };
 }
 
@@ -347,6 +358,12 @@ export function summarize(report: RunReport, v: ValidationReport): string {
   if (report.gaps.length > 25) out.push(`  … and ${report.gaps.length - 25} more (see report.json)`);
   out.push('', `Spec audit: ${report.specProblems.length} findings for the owner of the spec`);
   for (const f of report.specProblems) out.push(`  ${f.severity.padEnd(6)} ${f.message}`);
+  if (report.extensions.length) {
+    const undecided = report.extensions.filter((e) => !e.role);
+    out.push('', `Vendor extensions: ${report.extensions.length} found, ${report.extensions.length - undecided.length} given a role by the settings`);
+    for (const e of report.extensions.slice(0, 20)) out.push(`  ${e.name.padEnd(28)} ${String(e.count).padStart(5)}  ${(e.role ?? (e.suggestedRole ? `undecided (suggests ${e.suggestedRole})` : 'undecided')).padEnd(30)} ${e.where.join(', ')}`);
+    if (undecided.length) out.push('  An undecided extension is not shown on any page. Give it a role in the settings, or ignore.');
+  }
   const count = (s: string) => v.findings.filter((f) => f.severity === s).length;
   out.push('', `Contract validation: ${v.ok ? 'passed' : 'FAILED'} (${count('error')} errors, ${count('blocker')} blockers, ${count('warning')} warnings)`);
   if (v.withheld.length) out.push(`  withheld from publishing: ${v.withheld.join(', ')}`);

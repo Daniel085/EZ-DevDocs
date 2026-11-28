@@ -4,7 +4,8 @@
 
 import { explicitExample, findResources, idPathInResponse } from './analyze.ts';
 import { deref, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
-import { code, meta } from './text.ts';
+import type { ExtensionInfo } from './extensions.ts';
+import { code, meta, prose } from './text.ts';
 
 export type Severity = 'high' | 'medium' | 'low';
 
@@ -229,7 +230,7 @@ export function auditSpec(model: SpecModel): AuditFinding[] {
 }
 
 /** The audit as a Markdown document for the owner of the API description. */
-export function renderAudit(model: SpecModel, findings: AuditFinding[], context: { pages: number; skipped: number; operationsInGuides: number }): string {
+export function renderAudit(model: SpecModel, findings: AuditFinding[], extensions: ExtensionInfo[], context: { pages: number; skipped: number; operationsInGuides: number }): string {
   const lines: string[] = [];
   const title = meta(model.title, 120) || 'this API';
   lines.push(`# Spec audit: ${title} ${meta(model.version, 40)}`.trimEnd(), '');
@@ -239,8 +240,16 @@ export function renderAudit(model: SpecModel, findings: AuditFinding[], context:
     `From this description the generator wrote ${context.pages} pages and skipped ${context.skipped}. ${context.operationsInGuides} of ${model.operations.length} operations appear in a guide. The run report next to this file lists each skipped page with its reason.`,
     '',
   );
+  const extensionSection = () => {
+    if (extensions.length === 0) return;
+    lines.push('## Vendor extensions', '', `The description carries ${extensions.length} extension field${extensions.length > 1 ? 's' : ''} (names that start with ${code('x-')}). They are not part of OpenAPI, so tools that read the standard do not see them. Guides show one only when the settings of a build give it a role.`, '');
+    lines.push('| Extension | Used | On | Role in this build | Example value |', '| --- | --- | --- | --- | --- |');
+    for (const e of extensions) lines.push(`| ${code(e.name)} | ${e.count} | ${e.where.join(', ')} | ${e.role ?? (e.suggestedRole ? `none (its name suggests ${e.suggestedRole})` : 'none')}${e.shown === false ? ', but it is not on operations, so no page shows it' : ''} | ${prose(e.sample, 80)} |`);
+    lines.push('', 'What an extension says that readers need (errors, permissions, what must be switched on) is best said in standard fields too: `responses`, `security` and each operation\'s `description`.', '');
+  };
   if (findings.length === 0) {
     lines.push('No findings.', '');
+    extensionSection();
     return lines.join('\n');
   }
   const n = (s: Severity) => findings.filter((f) => f.severity === s).length;
@@ -255,5 +264,6 @@ export function renderAudit(model: SpecModel, findings: AuditFinding[], context:
       lines.push(`${f.subjects.length === f.count ? 'Affected' : 'In'}: ${shown.join(', ')}${f.subjects.length > 20 ? `, and ${f.subjects.length - 20} more (all are in the run report)` : ''}.`, '');
     }
   }
+  extensionSection();
   return lines.join('\n');
 }
