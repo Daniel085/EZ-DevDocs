@@ -241,7 +241,10 @@ function firstCall(ctx: Ctx): { op: Operation; built: BuiltValues } | undefined 
     let score = 0;
     if (op.method === 'get') score += 50;
     else if (op.method === 'delete') score -= 100;
+    // A path parameter can only be filled from the spec's example, which names no record the reader
+    // has. A first call should work, so one without path parameters is strongly preferred.
     if (!op.parameters.some((p) => p.in === 'path')) score += 20;
+    else score -= 40;
     // When the API has credentials, the first call should show them being used.
     if (secured && !requiresCredentials(op)) score -= 40;
     if (!built.placeholder) score += 10;
