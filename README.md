@@ -71,7 +71,8 @@ const { files, manifest, report, validation, auditMarkdown } = generate(specByte
 | `idempotency` | An operation takes an idempotency key, in a header or as a field of its request body. |
 | `rate-limits` | The spec documents a 429 response or a rate limit header. |
 | `webhooks` | The spec has `webhooks` or callbacks. |
-| `<resource>/manage` | A resource can be created, and the new identifier can be carried into retrieve, update or delete. |
+| `<resource>/manage` | A top-level resource can be created, and the new identifier can be carried into retrieve, update or delete. |
+| `<resource>/<action>` | A created resource has an operation on `/things/{id}/verb`, such as taking a payment on an order. One guide per operation, titled as the spec titles it: it creates a fresh record, then calls the operation on it. |
 | `<resource>/browse` | A resource cannot be created but can be listed and then retrieved. |
 | `tutorials/<parent>-<child>` | A collection is nested under a resource: create the parent, then work inside it. |
 

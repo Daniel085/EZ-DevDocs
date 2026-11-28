@@ -57,7 +57,7 @@ function varyValues(values: Json, refusal: string): boolean {
     if (typeof v === 'string') {
       if (quoted.includes(v)) {
         changed = true;
-        return /^[A-Z0-9]{2,6}$/.test(v) ? (v.slice(0, 1) + runTag.toUpperCase()).slice(0, Math.max(v.length, 3)).replace(/[^A-Z0-9]/g, 'X') + String(n % 10) : /^\d+$/.test(v) ? String(Number(v) + 1 + (n % 900)) : /\s/.test(v) ? `${v} ${runTag}${n}` : `${v}-${runTag}${n}`;
+        return /^[A-Z0-9]{2,8}$/.test(v) ? Array.from({ length: Math.max(v.length, 6) }, () => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[Math.floor(Math.random() * 32)]).join('') : /^\d+$/.test(v) ? String(Number(v) + 1 + (n % 900)) : /\s/.test(v) ? `${v} ${runTag}${n}` : `${v}-${runTag}${n}`;
       }
       if (quoted.length === 0 && /^\+1\d{10}$/.test(v)) {
         changed = true;

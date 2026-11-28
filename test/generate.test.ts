@@ -427,3 +427,30 @@ test('titles keep the path segments that tell resources apart', () => {
   const { report } = generate(JSON.stringify(spec), { manifestSchema });
   assert.deepEqual(report.pages.filter((p) => p.type === 'how-to').map((p) => p.title).sort(), ['List and retrieve issuing transactions', 'List and retrieve treasury transactions']);
 });
+
+test('an action on a record gets a guide of its own, titled as the spec titles it', () => {
+  const thing = { type: 'object', properties: { id: { type: 'string' } } };
+  const ok = { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } };
+  const id = [{ name: 'order_id', in: 'path', required: true, schema: { type: 'string' }, example: 'made-up' }];
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/orders': { post: { operationId: 'createOrder', summary: 'Write up an order', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { note: { type: 'string', example: 'x' } } } } } }, responses: { '201': ok['200'] } } },
+      '/orders/{order_id}': { get: { operationId: 'getOrder', parameters: id, responses: ok } },
+      '/orders/{order_id}/payments': { post: { operationId: 'takePayment', summary: 'Take a payment', parameters: id, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { amount: { type: 'string', example: '10.00' } } } } } }, responses: ok } },
+      '/orders/{order_id}/cancel': { post: { operationId: 'cancelOrder', parameters: id, responses: ok } },
+      '/orders/{order_id}/lines': { get: { operationId: 'listLines', parameters: id, responses: ok }, post: { operationId: 'addLine', parameters: id, responses: ok } },
+    },
+  };
+  const { files, report, validation } = generate(JSON.stringify(spec), { manifestSchema, reportSchema });
+  assert.deepEqual(errorsOf(validation), []);
+  const page = text(files.get('pages/orders/payments.md')!);
+  assert.match(page, /^title: "Take a payment"$/m);
+  assert.match(page, /operation="createOrder" capture="order_id=\$\.id"[\s\S]*<Step title="Take a payment">[\s\S]*"order_id": "\{\{order_id\}\}"[\s\S]*"amount": "10\.00"/);
+  assert.doesNotMatch(page, /made-up/, 'the record acted on is the one the guide created, not the example');
+  assert.equal(report.pages.find((p) => p.page === 'orders/cancel')!.title, 'Cancel an order');
+  assert.ok(!files.has('pages/orders/lines.md'), 'a collection under the record is not an action');
+  assert.ok(![...files.keys()].some((f) => text(files.get(f)!).includes('made-up')), 'no page is written from a made-up parent identifier');
+});

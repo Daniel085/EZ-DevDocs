@@ -18,7 +18,7 @@ import {
   type Resource,
 } from './analyze.ts';
 import { deref, schemaRefName, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
-import { attr, capitalize, code, frontmatter, meta, plainText, prose, singular } from './text.ts';
+import { attr, capitalize, code, frontmatter, meta, plainText, prose, singular, slugify, words } from './text.ts';
 
 export { singular };
 import type { SchemaChecker } from './values.ts';
@@ -468,6 +468,9 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
   const one = singular(r.noun);
   const manage = `${r.slug}/manage`;
   if (!r.itemPath || !r.idParam) return { page: manage, reason: `${r.collectionPath} has no operations on a single item, so there is no flow to describe` };
+  // A collection under a parent record needs that record's identifier. An example in the spec is
+  // not a record in the reader's account, so this guide would not run; the tutorial creates the parent.
+  if (r.parentParams.length > 0) return { page: manage, reason: `${r.collectionPath} sits under a parent record, whose identifier this guide would have to make up; a tutorial that creates the parent covers it where one can be written` };
   const ok = (op: Operation | undefined): op is Operation => !!op && usableId(op.id);
   const variable = idVariable(r);
   const bind = { [r.idParam]: `{{${variable}}}` };
@@ -578,4 +581,64 @@ export function nestedTutorial(ctx: Ctx, parent: Resource, child: Resource): Res
   const page = d.finish(slug, 'tutorial', `Create ${article(pOne)} with ${child.noun}`.slice(0, 80), `Create ${article(pOne)}, then add ${child.noun} to it, carrying identifiers from one call to the next.`.slice(0, 200));
   page.group = parent.tag;
   return page;
+}
+
+/**
+ * What a resource can be made to do, beyond being created, read and changed: an operation on
+ * `/things/{id}/verb`, such as taking a payment on an order. Each gets a guide of its own, titled
+ * as the spec titles the operation, that creates a fresh record and then calls the operation on it.
+ */
+export function actionPages(ctx: Ctx, r: Resource): Result[] {
+  const { model, checker } = ctx;
+  const out: Result[] = [];
+  if (!r.itemPath || !r.idParam || r.parentParams.length > 0 || !r.create || !usableId(r.create.id)) return out;
+  const idPath = idPathInResponse(model, r.create, r.idParam);
+  if (!idPath) return out;
+  const variable = idVariable(r);
+  const one = singular(r.noun);
+  const taken = new Set(['manage', 'browse']);
+  const prefix = r.itemPath + '/';
+  for (const op of model.operations) {
+    if (op.deprecated || !op.path.startsWith(prefix) || !['post', 'put', 'patch', 'delete'].includes(op.method) || !usableId(op.id)) continue;
+    const rest = op.path.slice(prefix.length);
+    if (rest.includes('/') || rest.includes('{')) continue;
+    // A collection under the record, one that can be listed or has items of its own, is a tutorial's subject.
+    const collection = ctx.resources.find((c) => c.collectionPath === op.path);
+    if (collection && (collection.list || collection.itemPath)) continue;
+    const verb = slugify(rest);
+    if (!verb || taken.has(verb) || model.operations.some((o) => o !== op && o.path === op.path && ['post', 'put', 'patch', 'delete'].includes(o.method) && model.operations.indexOf(o) < model.operations.indexOf(op))) continue;
+    taken.add(verb);
+    const slug = `${r.slug}/${verb}`;
+
+    const pre = newPrereqState([variable]);
+    const made = bindBodyIds(model, checker, ctx.resources, r.create, buildValues(model, checker, r.create), pre, { exclude: [r] });
+    if (!made.ok) {
+      out.push({ page: slug, reason: `${r.create.id}: ${made.reason}` });
+      continue;
+    }
+    const bind = { [r.idParam]: `{{${variable}}}` };
+    const built = bindBodyIds(model, checker, ctx.resources, op, buildValues(model, checker, op, bind), pre, { exclude: [r], available: bind });
+    if (!built.ok) {
+      out.push({ page: slug, reason: `${op.id}: ${built.reason}` });
+      continue;
+    }
+    const d = new Doc();
+    const summary = meta(op.summary, 80).replace(/[.\s]+$/, '');
+    const title = summary || capitalize(`${words(rest)} ${article(one)}`);
+    d.add(`This guide creates ${article(one)}, then calls ${opLink(op)} on it. The ${one} is created here so that the call has a record of its own to act on.`);
+    prerequisiteBlock(d, ctx, pre);
+    if (pre.steps.length) d.add(`## ${prose(title)}`);
+    d.add('<Steps>');
+    step(d, `Create ${article(one)}`, r.create, made, [variable, idPath], `The identifier is at ${code(idPath)} in the response. The next step sends it as ${code(r.idParam)}.`);
+    d.add(`<Step title="${stepTitle(op, title)}">`, opIntro(op));
+    d.sample(op, built);
+    d.response(model, op);
+    d.add('</Step>', '</Steps>');
+    const manage = `${r.slug}/manage`;
+    if (ctx.has(manage)) d.add(`To retrieve, change or list ${r.noun}, see [${capitalize(r.label)}](guide:${manage}).`);
+    const page = d.finish(slug, 'how-to', title.slice(0, 80), `Create ${article(one)}, then ${summary ? `call ${meta(op.id, 80)} on it` : `${words(rest)} it`}.`.slice(0, 200));
+    page.group = r.tag ?? op.tags[0];
+    out.push(page);
+  }
+  return out;
 }

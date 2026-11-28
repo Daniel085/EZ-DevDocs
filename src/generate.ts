@@ -4,6 +4,7 @@
 import { findResources } from './analyze.ts';
 import { auditSpec, renderAudit, type AuditFinding } from './audit.ts';
 import {
+  actionPages,
   authenticationPage,
   errorsPage,
   idempotencyPage,
@@ -92,7 +93,11 @@ export interface GenerateResult {
 
 function build(ctx: Ctx): Result[] {
   const results: Result[] = [quickstartPage(ctx), authenticationPage(ctx), errorsPage(ctx), paginationPage(ctx), idempotencyPage(ctx), rateLimitsPage(ctx), webhooksPage(ctx)];
-  for (const r of ctx.resources) if (r.itemPath) results.push(resourcePage(ctx, r));
+  for (const r of ctx.resources) {
+    if (!r.itemPath) continue;
+    results.push(resourcePage(ctx, r));
+    results.push(...actionPages(ctx, r));
+  }
   for (const child of ctx.resources) {
     if (!child.create || child.parentParams.length !== 1 || !(child.itemPath || child.list)) continue;
     const parent = ctx.resources.find((p) => p.itemPath !== undefined && child.collectionPath.startsWith(p.itemPath + '/') && !child.collectionPath.slice(p.itemPath.length + 1).includes('/'));
