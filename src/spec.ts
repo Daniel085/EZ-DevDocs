@@ -343,5 +343,8 @@ export function loadSpec(source: string | Uint8Array): SpecModel {
 /** First 2xx response, preferring one with a body. */
 export function successResponse(op: Operation): ResponseInfo | undefined {
   const ok = op.responses.filter((r) => /^2\d\d$/.test(r.status)).sort((a, b) => a.status.localeCompare(b.status));
+  // A POST that declares 201 answers 201 when it makes something; a 200 beside it is the repeat.
+  const created = op.method === 'post' ? ok.find((r) => r.status === '201') : undefined;
+  if (created && (created.schema || !ok.some((r) => r.schema))) return created;
   return ok.find((r) => r.schema) ?? ok[0];
 }

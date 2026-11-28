@@ -18,7 +18,7 @@ import {
   type Resource,
 } from './analyze.ts';
 import { deref, schemaRefName, successResponse, type Json, type Operation, type SpecModel } from './spec.ts';
-import { attr, capitalize, code, frontmatter, meta, plainText, prose, singular } from './text.ts';
+import { attr, capitalize, code, frontmatter, meta, plainText, prose, singular, slugify, words } from './text.ts';
 
 export { singular };
 import type { SchemaChecker } from './values.ts';
@@ -36,6 +36,8 @@ export interface Page {
   gaps: string[];
   /** Operations whose sample values were invented from types alone. */
   placeholders: string[];
+  /** The spec tag the page belongs under in navigation, when its resource has one. */
+  group?: string;
 }
 
 export interface Skipped {
@@ -122,6 +124,14 @@ class Doc {
 
   finish(slug: string, type: PageType, title: string, description: string): Page {
     const operations = [...this.operations];
+    // Values built from types alone are valid but not real. The page says so, where a reader will
+    // see it, and names the calls; otherwise a flow of made-up values reads as one that works.
+    const made = [...new Set(this.placeholders)];
+    if (made.length) {
+      const names = made.slice(0, 4).map((id) => code(id));
+      const which = `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]}${made.length > 4 ? ` and ${made.length - 4} more` : ''}`;
+      this.lines.splice(this.lines[0] !== undefined && !this.lines[0].startsWith('<') && !this.lines[0].startsWith('#') ? 2 : 0, 0, '<Callout type="warning" title="Placeholder values">', '', `The API description gives no example values for ${which}. The values sent on this page for ${made.length > 1 ? 'those calls' : 'that call'} are built from each field's type. They fit the schema but are not real, so the API may refuse them. Replace them with your own before you rely on this page.`, '', '</Callout>', '');
+    }
     const head = frontmatter({ title, description, type, operations });
     return {
       slug,
@@ -239,7 +249,10 @@ function firstCall(ctx: Ctx): { op: Operation; built: BuiltValues } | undefined 
     let score = 0;
     if (op.method === 'get') score += 50;
     else if (op.method === 'delete') score -= 100;
+    // A path parameter can only be filled from the spec's example, which names no record the reader
+    // has. A first call should work, so one without path parameters is strongly preferred.
     if (!op.parameters.some((p) => p.in === 'path')) score += 20;
+    else score -= 40;
     // When the API has credentials, the first call should show them being used.
     if (secured && !requiresCredentials(op)) score -= 40;
     if (!built.placeholder) score += 10;
@@ -427,41 +440,48 @@ export function webhooksPage(ctx: Ctx): Result {
 // ---------------------------------------------------------------------------------------------
 // Flows: how-to guides and tutorials
 
+/** A step is named as the spec names the operation ("Book a visit"), and generically only when it has no summary. */
+const stepTitle = (op: Operation, fallback: string) => attr(op.summary ?? '', 80) || attr(fallback);
+
 function step(d: Doc, title: string, op: Operation, built: BuiltValues, capture?: [string, string], after?: string): void {
-  d.add(`<Step title="${attr(title)}">`, opIntro(op));
+  d.add(`<Step title="${stepTitle(op, title)}">`, opIntro(op));
   d.sample(op, built, { capture });
   d.add(after, '</Step>');
 }
 
-/** Steps that create the records a later request body refers to by identifier. */
-function prerequisiteSteps(d: Doc, ctx: Ctx, pre: PrereqState): void {
-  for (const p of pre.steps) {
-    const one = singular(p.resource.noun);
-    const summary = prose(p.op.summary, 160).replace(/[.\s]+$/, '');
-    d.add(`<Step title="${attr(`Create ${article(one)} to refer to`)}">`);
-    d.add(`The request body of ${opLink(p.neededBy)} refers to ${article(one)} by ${code(p.field)}, so this guide creates one first.`, `Call ${opLink(p.op)}${summary ? `: ${summary}.` : '.'}`);
-    d.sample(p.op, p.built, { capture: [p.variable, p.idPath] });
-    d.add(`The identifier is at ${code(p.idPath)} in the response. Later steps send it as ${code(p.field)}.`);
-    const guide = `${p.resource.slug}/manage`;
-    if (ctx.has(guide)) d.add(`For more on ${p.resource.noun}, see [${capitalize(p.resource.noun)}](guide:${guide}).`);
-    d.add('</Step>');
-  }
+/**
+ * The records a later request body refers to by identifier, created in a block of their own
+ * before the task, so the task's steps start at the task.
+ */
+function prerequisiteBlock(d: Doc, ctx: Ctx, pre: PrereqState): void {
   if (pre.unresolved.size) {
     d.gaps.push(`Samples send example values for ${[...pre.unresolved].sort().map((f) => `'${f}'`).join(', ')}, which no earlier step produces. Say where a reader gets them.`);
   }
-}
-
-const prerequisiteIntro = (pre: PrereqState) => {
+  if (pre.steps.length === 0) return;
   const nouns = [...new Set(pre.steps.map((p) => article(singular(p.resource.noun))))];
-  if (!nouns.length) return '';
-  return ` Before that, it creates ${nouns.length > 1 ? `${nouns.slice(0, -1).join(', ')} and ${nouns.at(-1)}` : nouns[0]}, which the requests refer to by identifier.`;
-};
+  d.add('## Before you start', `The requests below refer to ${nouns.length > 1 ? `${nouns.slice(0, -1).join(', ')} and ${nouns.at(-1)}` : nouns[0]} by identifier. These steps create ${pre.steps.length > 1 ? 'them' : 'one'} and capture ${pre.steps.length > 1 ? 'the identifiers' : 'its identifier'}. To use a record you already have, send its identifier instead.`);
+  d.add('<Steps>');
+  for (const p of pre.steps) {
+    const one = singular(p.resource.noun);
+    d.add(`<Step title="${stepTitle(p.op, `Create ${article(one)}`)}">`);
+    d.add(`${opLink(p.neededBy)} refers to ${article(one)} by ${code(p.field)}. Call ${opLink(p.op)} to create one.`);
+    d.sample(p.op, p.built, { capture: [p.variable, p.idPath] });
+    d.add(`The identifier is at ${code(p.idPath)} in the response. Later steps send it as ${code(p.field)}.`);
+    const guide = `${p.resource.slug}/manage`;
+    if (ctx.has(guide)) d.add(`For more on ${p.resource.noun}, see [${capitalize(p.resource.label)}](guide:${guide}).`);
+    d.add('</Step>');
+  }
+  d.add('</Steps>');
+}
 
 export function resourcePage(ctx: Ctx, r: Resource): Result {
   const { model, checker } = ctx;
   const one = singular(r.noun);
   const manage = `${r.slug}/manage`;
   if (!r.itemPath || !r.idParam) return { page: manage, reason: `${r.collectionPath} has no operations on a single item, so there is no flow to describe` };
+  // A collection under a parent record needs that record's identifier. An example in the spec is
+  // not a record in the reader's account, so this guide would not run; the tutorial creates the parent.
+  if (r.parentParams.length > 0) return { page: manage, reason: `${r.collectionPath} sits under a parent record, whose identifier this guide would have to make up; a tutorial that creates the parent covers it where one can be written` };
   const ok = (op: Operation | undefined): op is Operation => !!op && usableId(op.id);
   const variable = idVariable(r);
   const bind = { [r.idParam]: `{{${variable}}}` };
@@ -494,12 +514,14 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
     else notes.push(`${op.id} was left out: ${b.reason}.`);
   };
   tryAdd(`Retrieve the ${one}`, r.get);
-  tryAdd(`Update the ${one}`, r.update);
+  // A record the guide did not create is only read. Changing or deleting whatever a list returns
+  // first would act on a record the reader never chose.
+  if (source === 'create') tryAdd(`Update the ${one}`, r.update);
   if (source === 'create' && ok(r.list)) {
     const b = buildValues(model, checker, r.list);
     if (b.ok) follow.push([`List ${r.noun}`, r.list, b]);
   }
-  tryAdd(`Delete the ${one}`, r.remove);
+  if (source === 'create') tryAdd(`Delete the ${one}`, r.remove);
   // Identifiers in request bodies: the resource's own comes from the first call, others from
   // records created beforehand.
   const pre = newPrereqState([variable]);
@@ -513,11 +535,12 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
   const verbs = follow.map(([, op]) => (op === r.get ? 'retrieve' : op === r.update ? 'update' : op === r.remove ? 'delete' : 'list'));
   const list = verbs.length > 1 ? `${verbs.slice(0, -1).join(', ')} and ${verbs.at(-1)}` : verbs[0]!;
   const firstOp = source === 'create' ? r.create! : r.list!;
-  if (source === 'create') d.add(`This guide creates ${article(one)}, then uses its identifier to ${list} it. Each step carries the identifier forward from the call that creates it.${prerequisiteIntro(pre)}`);
-  else d.add(`This guide lists ${r.noun}, takes the identifier of the first one, and uses it to ${list} it.${prerequisiteIntro(pre)}`);
+  if (source === 'create') d.add(`This guide creates ${article(one)}, then uses its identifier to ${list} it. Each step carries the identifier forward from the call that creates it.`);
+  else d.add(`This guide lists ${r.noun}, takes the identifier of the first one, and uses it to ${list} it.`);
+  prerequisiteBlock(d, ctx, pre);
+  if (pre.steps.length) d.add(`## ${capitalize(source === 'create' ? `create the ${one}, then ${list} it` : `list ${r.noun}`)}`);
   d.add('<Steps>');
-  prerequisiteSteps(d, ctx, pre);
-  d.add(`<Step title="${attr(source === 'create' ? `Create ${article(one)}` : `List ${r.noun}`)}">`, opIntro(firstOp));
+  d.add(`<Step title="${stepTitle(firstOp, source === 'create' ? `Create ${article(one)}` : `List ${r.noun}`)}">`, opIntro(firstOp));
   d.sample(firstOp, first, { capture: [variable, path] });
   d.response(model, firstOp);
   d.add(`The identifier is at ${code(path)} in the response. The following steps send it as ${code(r.idParam)}.`, '</Step>');
@@ -525,8 +548,10 @@ export function resourcePage(ctx: Ctx, r: Resource): Result {
   d.add('</Steps>');
 
   const manages = verbs.includes('update') || verbs.includes('delete');
-  const title = source === 'create' ? `${manages ? 'Create and manage' : 'Create and retrieve'} ${r.noun}` : `${manages ? 'Find and manage' : 'List and retrieve'} ${r.noun}`;
-  return d.finish(slug, 'how-to', title.slice(0, 80), `${capitalize(source === 'create' ? `create ${article(one)}` : `list ${r.noun}`)}, then ${list} it, passing its identifier from call to call.`.slice(0, 200));
+  const title = source === 'create' ? `${manages ? 'Create and manage' : 'Create and retrieve'} ${r.label}` : `List and retrieve ${r.label}`;
+  const page = d.finish(slug, 'how-to', title.slice(0, 80), `${capitalize(source === 'create' ? `create ${article(one)}` : `list ${r.label}`)}, then ${list} it, passing its identifier from call to call.`.slice(0, 200));
+  page.group = r.tag;
+  return page;
 }
 
 /** A parent resource and a collection nested under it: create the parent, then work inside it. */
@@ -547,9 +572,10 @@ export function nestedTutorial(ctx: Ctx, parent: Resource, child: Resource): Res
   const pOne = singular(parent.noun);
   const cOne = singular(child.noun);
   const d = new Doc();
-  d.add(`This tutorial creates ${article(pOne)}, then adds ${article(cOne)} to it. The identifier of the ${pOne} is used in every call that follows.${prerequisiteIntro(pre)}`);
+  d.add(`This tutorial creates ${article(pOne)}, then adds ${article(cOne)} to it. The identifier of the ${pOne} is used in every call that follows.`);
+  prerequisiteBlock(d, ctx, pre);
+  if (pre.steps.length) d.add(`## ${capitalize(`create the ${pOne} and add ${article(cOne)}`)}`);
   d.add('<Steps>');
-  prerequisiteSteps(d, ctx, pre);
   step(d, `Create ${article(pOne)}`, parent.create, pBuilt, [pVar, pPath], `The identifier is at ${code(pPath)} in the response.`);
 
   let cVar = idVariable(child);
@@ -563,5 +589,67 @@ export function nestedTutorial(ctx: Ctx, parent: Resource, child: Resource): Res
   }
   if (getChild?.ok) step(d, `Retrieve the ${cOne}`, child.get!, getChild);
   d.add('</Steps>');
-  return d.finish(slug, 'tutorial', `Create ${article(pOne)} with ${child.noun}`.slice(0, 80), `Create ${article(pOne)}, then add ${child.noun} to it, carrying identifiers from one call to the next.`.slice(0, 200));
+  const page = d.finish(slug, 'tutorial', `Create ${article(pOne)} with ${child.noun}`.slice(0, 80), `Create ${article(pOne)}, then add ${child.noun} to it, carrying identifiers from one call to the next.`.slice(0, 200));
+  page.group = parent.tag;
+  return page;
+}
+
+/**
+ * What a resource can be made to do, beyond being created, read and changed: an operation on
+ * `/things/{id}/verb`, such as taking a payment on an order. Each gets a guide of its own, titled
+ * as the spec titles the operation, that creates a fresh record and then calls the operation on it.
+ */
+export function actionPages(ctx: Ctx, r: Resource): Result[] {
+  const { model, checker } = ctx;
+  const out: Result[] = [];
+  if (!r.itemPath || !r.idParam || r.parentParams.length > 0 || !r.create || !usableId(r.create.id)) return out;
+  const idPath = idPathInResponse(model, r.create, r.idParam);
+  if (!idPath) return out;
+  const variable = idVariable(r);
+  const one = singular(r.noun);
+  const taken = new Set(['manage', 'browse']);
+  const prefix = r.itemPath + '/';
+  for (const op of model.operations) {
+    if (op.deprecated || !op.path.startsWith(prefix) || !['post', 'put', 'patch', 'delete'].includes(op.method) || !usableId(op.id)) continue;
+    const rest = op.path.slice(prefix.length);
+    if (rest.includes('/') || rest.includes('{')) continue;
+    // A collection under the record, one that can be listed or has items of its own, is a tutorial's subject.
+    const collection = ctx.resources.find((c) => c.collectionPath === op.path);
+    if (collection && (collection.list || collection.itemPath)) continue;
+    const verb = slugify(rest);
+    if (!verb || taken.has(verb) || model.operations.some((o) => o !== op && o.path === op.path && ['post', 'put', 'patch', 'delete'].includes(o.method) && model.operations.indexOf(o) < model.operations.indexOf(op))) continue;
+    taken.add(verb);
+    const slug = `${r.slug}/${verb}`;
+
+    const pre = newPrereqState([variable]);
+    const made = bindBodyIds(model, checker, ctx.resources, r.create, buildValues(model, checker, r.create), pre, { exclude: [r] });
+    if (!made.ok) {
+      out.push({ page: slug, reason: `${r.create.id}: ${made.reason}` });
+      continue;
+    }
+    const bind = { [r.idParam]: `{{${variable}}}` };
+    const built = bindBodyIds(model, checker, ctx.resources, op, buildValues(model, checker, op, bind), pre, { exclude: [r], available: bind });
+    if (!built.ok) {
+      out.push({ page: slug, reason: `${op.id}: ${built.reason}` });
+      continue;
+    }
+    const d = new Doc();
+    const summary = meta(op.summary, 80).replace(/[.\s]+$/, '');
+    const title = summary || capitalize(`${words(rest)} ${article(one)}`);
+    d.add(`This guide creates ${article(one)}, then calls ${opLink(op)} on it. The ${one} is created here so that the call has a record of its own to act on.`);
+    prerequisiteBlock(d, ctx, pre);
+    if (pre.steps.length) d.add(`## ${prose(title)}`);
+    d.add('<Steps>');
+    step(d, `Create ${article(one)}`, r.create, made, [variable, idPath], `The identifier is at ${code(idPath)} in the response. The next step sends it as ${code(r.idParam)}.`);
+    d.add(`<Step title="${stepTitle(op, title)}">`, opIntro(op));
+    d.sample(op, built);
+    d.response(model, op);
+    d.add('</Step>', '</Steps>');
+    const manage = `${r.slug}/manage`;
+    if (ctx.has(manage)) d.add(`To retrieve, change or list ${r.noun}, see [${capitalize(r.label)}](guide:${manage}).`);
+    const page = d.finish(slug, 'how-to', title.slice(0, 80), `${summary || title}. This guide creates ${article(one)} first, so the call has a record to act on.`.slice(0, 200));
+    page.group = r.tag ?? op.tags[0];
+    out.push(page);
+  }
+  return out;
 }

@@ -336,3 +336,160 @@ test('without a record of what was generated, every existing page is kept', () =
   assert.equal(text(second.files.get('pages/orders/manage.md')!), text(first.files.get('pages/orders/manage.md')!));
   assert.ok(second.report.pages.filter((p) => p.outcome === 'written').every((p) => p.kept === 'edited'));
 });
+
+test('a guide only changes or deletes a record it created', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/keys': { get: { operationId: 'listKeys', responses: { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' } } } } } } } } } },
+      '/keys/{key_id}': {
+        parameters: [{ name: 'key_id', in: 'path', required: true, schema: { type: 'string' } }],
+        get: { operationId: 'getKey', responses: { '200': { description: 'ok' } } },
+        patch: { operationId: 'updateKey', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string', example: 'a' } } } } } }, responses: { '200': { description: 'ok' } } },
+        delete: { operationId: 'deleteKey', responses: { '204': { description: 'gone' } } },
+      },
+    },
+  };
+  const { files, report } = generate(JSON.stringify(spec), { manifestSchema });
+  const page = text(files.get('pages/keys/browse.md')!);
+  assert.match(page, /operation="listKeys"[\s\S]*operation="getKey"/);
+  assert.doesNotMatch(page, /deleteKey|updateKey/);
+  assert.deepEqual(report.pages.find((p) => p.page === 'keys/browse')!.operations, ['listKeys', 'getKey']);
+});
+
+test('two example identifiers in one body are two records; a list of identifiers is bound too', () => {
+  const thing = { type: 'object', properties: { id: { type: 'string' } } };
+  const created = (schema: unknown) => ({ '201': { description: 'ok', content: { 'application/json': { schema } } } });
+  const body = (schema: unknown) => ({ required: true, content: { 'application/json': { schema } } });
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    tags: [{ name: 'Selling' }, { name: 'Catalog' }],
+    paths: {
+      '/items': { post: { operationId: 'createItem', summary: 'Add an item', tags: ['Catalog'], requestBody: body({ type: 'object', properties: { sku: { type: 'string', example: 'A-1' } } }), responses: created(thing) } },
+      '/items/{item_id}': { get: { operationId: 'getItem', tags: ['Catalog'], parameters: [{ name: 'item_id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } } } },
+      '/labels': { post: { operationId: 'createLabel', tags: ['Catalog'], requestBody: body({ type: 'object', properties: { name: { type: 'string', example: 'new' } } }), responses: created(thing) } },
+      '/labels/{label_id}': { get: { operationId: 'getLabel', tags: ['Catalog'], parameters: [{ name: 'label_id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } } } },
+      '/orders': {
+        post: {
+          operationId: 'createOrder',
+          summary: 'Write up an order',
+          tags: ['Selling'],
+          requestBody: body({
+            type: 'object',
+            properties: { label_ids: { type: 'array', items: { type: 'string' } }, lines: { type: 'array', items: { type: 'object', properties: { item_id: { type: 'string' } } } } },
+            examples: [{ label_ids: ['l-1'], lines: [{ item_id: 'i-1' }, { item_id: 'i-2' }, { item_id: 'i-1' }] }],
+          }),
+          responses: created(thing),
+        },
+      },
+      '/orders/{order_id}': { get: { operationId: 'getOrder', summary: 'Get an order', tags: ['Selling'], parameters: [{ name: 'order_id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } } } },
+    },
+  };
+  const { files, manifest, validation } = generate(JSON.stringify(spec), { manifestSchema, reportSchema });
+  assert.deepEqual(errorsOf(validation), []);
+  const page = text(files.get('pages/orders/manage.md')!);
+  assert.match(page, /capture="item_id=\$\.id"[\s\S]*capture="item_id_2=\$\.id"/, 'each different example item is created');
+  assert.match(page, /"item_id": "\{\{item_id\}\}"[\s\S]*"item_id": "\{\{item_id_2\}\}"[\s\S]*"item_id": "\{\{item_id\}\}"/, 'the same example is the same record');
+  assert.match(page, /"label_ids": \[\s*"\{\{label_id\}\}"\s*\]/);
+  assert.doesNotMatch(page, /"(i-1|i-2|l-1)"/);
+
+  // Prerequisites sit in their own block, and steps are named as the spec names them.
+  const before = page.indexOf('## Before you start');
+  const task = page.indexOf('## Create the order, then retrieve it');
+  assert.ok(before > 0 && task > before && page.indexOf('operation="createItem"') < task && page.indexOf('operation="createOrder"') > task);
+  assert.match(page, /<Step title="Add an item">[\s\S]*<Step title="Write up an order">[\s\S]*<Step title="Get an order">/);
+
+  // Navigation follows the spec's tags, in the spec's order.
+  assert.deepEqual(manifest.nav.filter((n: { group?: string }) => n.group).map((n: { group: string; items: { page: string }[] }) => [n.group, n.items.map((i) => i.page)]), [
+    ['Selling', ['orders/manage']],
+    ['Catalog', ['items/manage', 'labels/manage']],
+  ]);
+});
+
+test('titles keep the path segments that tell resources apart', () => {
+  const list = { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' } } } } } } } };
+  const one = (id: string) => ({ get: { operationId: id, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok' } } } });
+  const spec = {
+    openapi: '3.0.3',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/v1/treasury/transactions': { get: { operationId: 'listTreasury', responses: list } },
+      '/v1/treasury/transactions/{id}': one('getTreasury'),
+      '/v1/issuing/transactions': { get: { operationId: 'listIssuing', responses: list } },
+      '/v1/issuing/transactions/{id}': one('getIssuing'),
+    },
+  };
+  const { report } = generate(JSON.stringify(spec), { manifestSchema });
+  assert.deepEqual(report.pages.filter((p) => p.type === 'how-to').map((p) => p.title).sort(), ['List and retrieve issuing transactions', 'List and retrieve treasury transactions']);
+});
+
+test('an action on a record gets a guide of its own, titled as the spec titles it', () => {
+  const thing = { type: 'object', properties: { id: { type: 'string' } } };
+  const ok = { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } };
+  const id = [{ name: 'order_id', in: 'path', required: true, schema: { type: 'string' }, example: 'made-up' }];
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/orders': { post: { operationId: 'createOrder', summary: 'Write up an order', requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { note: { type: 'string', example: 'x' } } } } } }, responses: { '201': ok['200'] } } },
+      '/orders/{order_id}': { get: { operationId: 'getOrder', parameters: id, responses: ok } },
+      '/orders/{order_id}/payments': { post: { operationId: 'takePayment', summary: 'Take a payment', parameters: id, requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', properties: { amount: { type: 'string', example: '10.00' } } } } } }, responses: ok } },
+      '/orders/{order_id}/cancel': { post: { operationId: 'cancelOrder', parameters: id, responses: ok } },
+      '/orders/{order_id}/lines': { get: { operationId: 'listLines', parameters: id, responses: ok }, post: { operationId: 'addLine', parameters: id, responses: ok } },
+    },
+  };
+  const { files, report, validation } = generate(JSON.stringify(spec), { manifestSchema, reportSchema });
+  assert.deepEqual(errorsOf(validation), []);
+  const page = text(files.get('pages/orders/payments.md')!);
+  assert.match(page, /^title: "Take a payment"$/m);
+  assert.match(page, /operation="createOrder" capture="order_id=\$\.id"[\s\S]*<Step title="Take a payment">[\s\S]*"order_id": "\{\{order_id\}\}"[\s\S]*"amount": "10\.00"/);
+  assert.doesNotMatch(page, /made-up/, 'the record acted on is the one the guide created, not the example');
+  assert.equal(report.pages.find((p) => p.page === 'orders/cancel')!.title, 'Cancel an order');
+  assert.ok(!files.has('pages/orders/lines.md'), 'a collection under the record is not an action');
+  assert.ok(![...files.keys()].some((f) => text(files.get(f)!).includes('made-up')), 'no page is written from a made-up parent identifier');
+});
+
+test('the record a path parameter names is found by its id only when the parameter is one', () => {
+  const made = (props: object) => ({ '201': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: props } } } } });
+  const body = { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string', example: 'a' } } } } } };
+  const get = (name: string) => ({ get: { operationId: `get_${name}`, parameters: [{ name, in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok' } } } });
+  const spec = {
+    openapi: '3.0.3',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/customers': { post: { operationId: 'createCustomer', requestBody: body, responses: made({ id: { type: 'string' } }) } },
+      '/customers/{customer}': get('customer'),
+      '/payment_intents': { post: { operationId: 'createIntent', requestBody: body, responses: made({ id: { type: 'string' } }) } },
+      '/payment_intents/{intent}': get('intent'),
+      '/users': { post: { operationId: 'createUser', requestBody: body, responses: made({ id: { type: 'integer' }, login: { type: 'string' } }) } },
+      '/users/{username}': get('username'),
+    },
+  };
+  const { files, report } = generate(JSON.stringify(spec), { manifestSchema });
+  assert.match(text(files.get('pages/customers/manage.md')!), /capture="customer_id=\$\.id"/);
+  assert.match(text(files.get('pages/payment-intents/manage.md')!), /capture="intent_id=\$\.id"/);
+  assert.ok(!files.has('pages/users/manage.md'), 'a numeric id is not sent as a username');
+  assert.match(report.pages.find((p) => p.page === 'users/manage')!.reason!, /does not show where the new identifier is/);
+});
+
+test('a page built from placeholder values says so', () => {
+  const r = generate(readFileSync(join(root, 'fixtures/specs/synthetic-orders.yaml')), { manifestSchema });
+  const flagged = r.report.pages.filter((p) => p.placeholderValues).map((p) => p.page);
+  assert.ok(flagged.length > 0);
+  for (const [file, bytes] of r.files) {
+    if (!file.startsWith('pages/')) continue;
+    assert.equal(text(bytes).includes('<Callout type="warning" title="Placeholder values">'), flagged.includes(file.slice(6, -3)), file);
+  }
+});
+
+test('a create step reports 201 where the spec declares it', () => {
+  const page = text(generate(readFileSync(join(root, 'fixtures/specs/body-references.yaml')), { manifestSchema }).files.get('pages/customers/manage.md')!);
+  assert.match(page, /A successful call returns `201`/);
+});
