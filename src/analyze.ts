@@ -186,8 +186,19 @@ export function buildValues(model: SpecModel, checker: SchemaChecker, op: Operat
 // ---------------------------------------------------------------------------------------------
 // Identifiers in responses
 
-function idCandidates(idParam: string): string[] {
-  const out = [idParam, 'id'];
+/**
+ * Names a response may give the identifier under. `id` stands for the path parameter when the
+ * parameter is itself an identifier (`pet_id`, `petId`) or is named after the resource
+ * (`/customers/{customer}`, `/payment_intents/{intent}`). A `username` in the path of `/users` is
+ * not the `id` of the record.
+ */
+function idCandidates(idParam: string, path: string): string[] {
+  const plainOf = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const noun = segments(path).filter((x) => !isParam(x)).at(-1) ?? '';
+  const idLike = /(^|_|[a-z])id$/i.test(idParam) && !/[a-z]id$/.test(idParam.replace(/Id$/, '_id'));
+  // `/payment_intents/{intent}` names its resource too, by the last word.
+  const namesResource = plainOf(idParam).length > 2 && [plainOf(noun), plainOf(singular(words(noun)))].some((n) => n.endsWith(plainOf(idParam)));
+  const out = idLike || namesResource ? [idParam, 'id'] : [idParam];
   const snake = idParam.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
   if (snake !== idParam) out.push(snake);
   return [...new Set(out)];
@@ -200,14 +211,14 @@ const isScalar = (doc: Json, schema: Json) => {
 };
 
 /** JSONPath of the identifier in an object schema, looking one wrapper level down if needed. */
-function idInObject(doc: Json, schema: Json, idParam: string): string | undefined {
+function idInObject(doc: Json, schema: Json, idParam: string, path: string): string | undefined {
   const props = objectProperties(doc, schema);
-  for (const c of idCandidates(idParam)) if (props[c] && isScalar(doc, props[c])) return `$.${c}`;
+  for (const c of idCandidates(idParam, path)) if (props[c] && isScalar(doc, props[c])) return `$.${c}`;
   for (const [wrap, inner] of Object.entries(props)) {
     const s = deref(doc, inner);
     if (!s || s.type === 'array' || s.items) continue;
     const innerProps = objectProperties(doc, inner);
-    for (const c of idCandidates(idParam)) if (innerProps[c] && isScalar(doc, innerProps[c]) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(wrap)) return `$.${wrap}.${c}`;
+    for (const c of idCandidates(idParam, path)) if (innerProps[c] && isScalar(doc, innerProps[c]) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(wrap)) return `$.${wrap}.${c}`;
   }
   return undefined;
 }
@@ -218,7 +229,7 @@ const SAFE_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 export function idPathInResponse(model: SpecModel, op: Operation, idParam: string): string | undefined {
   const schema = successResponse(op)?.schema;
   if (!schema) return undefined;
-  const path = idInObject(model.doc, schema, idParam);
+  const path = idInObject(model.doc, schema, idParam, op.path);
   return path && path.split('.').slice(1).every((k) => SAFE_KEY.test(k)) ? path : undefined;
 }
 
@@ -229,7 +240,7 @@ export function firstIdPathInList(model: SpecModel, op: Operation, idParam: stri
   if (!s) return undefined;
   const inItems = (items: Json) => {
     const props = objectProperties(model.doc, items);
-    return idCandidates(idParam).find((c) => props[c] && isScalar(model.doc, props[c]) && SAFE_KEY.test(c));
+    return idCandidates(idParam, op.path).find((c) => props[c] && isScalar(model.doc, props[c]) && SAFE_KEY.test(c));
   };
   if (s.type === 'array' || s.items) {
     const c = inItems(s.items);

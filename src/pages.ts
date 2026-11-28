@@ -124,6 +124,14 @@ class Doc {
 
   finish(slug: string, type: PageType, title: string, description: string): Page {
     const operations = [...this.operations];
+    // Values built from types alone are valid but not real. The page says so, where a reader will
+    // see it, and names the calls; otherwise a flow of made-up values reads as one that works.
+    const made = [...new Set(this.placeholders)];
+    if (made.length) {
+      const names = made.slice(0, 4).map((id) => code(id));
+      const which = `${names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0]}${made.length > 4 ? ` and ${made.length - 4} more` : ''}`;
+      this.lines.splice(this.lines[0] !== undefined && !this.lines[0].startsWith('<') && !this.lines[0].startsWith('#') ? 2 : 0, 0, '<Callout type="warning" title="Placeholder values">', '', `The API description gives no example values for ${which}. The values sent on this page for ${made.length > 1 ? 'those calls' : 'that call'} are built from each field's type. They fit the schema but are not real, so the API may refuse them. Replace them with your own before you rely on this page.`, '', '</Callout>', '');
+    }
     const head = frontmatter({ title, description, type, operations });
     return {
       slug,
@@ -639,7 +647,7 @@ export function actionPages(ctx: Ctx, r: Resource): Result[] {
     d.add('</Step>', '</Steps>');
     const manage = `${r.slug}/manage`;
     if (ctx.has(manage)) d.add(`To retrieve, change or list ${r.noun}, see [${capitalize(r.label)}](guide:${manage}).`);
-    const page = d.finish(slug, 'how-to', title.slice(0, 80), `Create ${article(one)}, then ${summary ? `call ${meta(op.id, 80)} on it` : `${words(rest)} it`}.`.slice(0, 200));
+    const page = d.finish(slug, 'how-to', title.slice(0, 80), `${summary || title}. This guide creates ${article(one)} first, so the call has a record to act on.`.slice(0, 200));
     page.group = r.tag ?? op.tags[0];
     out.push(page);
   }

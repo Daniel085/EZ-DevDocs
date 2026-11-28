@@ -454,3 +454,42 @@ test('an action on a record gets a guide of its own, titled as the spec titles i
   assert.ok(!files.has('pages/orders/lines.md'), 'a collection under the record is not an action');
   assert.ok(![...files.keys()].some((f) => text(files.get(f)!).includes('made-up')), 'no page is written from a made-up parent identifier');
 });
+
+test('the record a path parameter names is found by its id only when the parameter is one', () => {
+  const made = (props: object) => ({ '201': { description: 'ok', content: { 'application/json': { schema: { type: 'object', properties: props } } } } });
+  const body = { required: true, content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string', example: 'a' } } } } } };
+  const get = (name: string) => ({ get: { operationId: `get_${name}`, parameters: [{ name, in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok' } } } });
+  const spec = {
+    openapi: '3.0.3',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/customers': { post: { operationId: 'createCustomer', requestBody: body, responses: made({ id: { type: 'string' } }) } },
+      '/customers/{customer}': get('customer'),
+      '/payment_intents': { post: { operationId: 'createIntent', requestBody: body, responses: made({ id: { type: 'string' } }) } },
+      '/payment_intents/{intent}': get('intent'),
+      '/users': { post: { operationId: 'createUser', requestBody: body, responses: made({ id: { type: 'integer' }, login: { type: 'string' } }) } },
+      '/users/{username}': get('username'),
+    },
+  };
+  const { files, report } = generate(JSON.stringify(spec), { manifestSchema });
+  assert.match(text(files.get('pages/customers/manage.md')!), /capture="customer_id=\$\.id"/);
+  assert.match(text(files.get('pages/payment-intents/manage.md')!), /capture="intent_id=\$\.id"/);
+  assert.ok(!files.has('pages/users/manage.md'), 'a numeric id is not sent as a username');
+  assert.match(report.pages.find((p) => p.page === 'users/manage')!.reason!, /does not show where the new identifier is/);
+});
+
+test('a page built from placeholder values says so', () => {
+  const r = generate(readFileSync(join(root, 'fixtures/specs/synthetic-orders.yaml')), { manifestSchema });
+  const flagged = r.report.pages.filter((p) => p.placeholderValues).map((p) => p.page);
+  assert.ok(flagged.length > 0);
+  for (const [file, bytes] of r.files) {
+    if (!file.startsWith('pages/')) continue;
+    assert.equal(text(bytes).includes('<Callout type="warning" title="Placeholder values">'), flagged.includes(file.slice(6, -3)), file);
+  }
+});
+
+test('a create step reports 201 where the spec declares it', () => {
+  const page = text(generate(readFileSync(join(root, 'fixtures/specs/body-references.yaml')), { manifestSchema }).files.get('pages/customers/manage.md')!);
+  assert.match(page, /A successful call returns `201`/);
+});
