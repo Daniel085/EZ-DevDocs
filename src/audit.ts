@@ -55,12 +55,12 @@ export function auditSpec(model: SpecModel): AuditFinding[] {
   });
   add({
     code: 'duplicate-operation-id',
-    severity: 'high',
+    severity: 'medium',
     title: 'operationId used more than once',
     unit: 'operations',
-    of: ops.length + issues('duplicate-operation-id').length,
+    of: ops.length,
     subjects: issues('duplicate-operation-id').map((i) => i.subject ?? ''),
-    detail: 'Only the first operation with each identifier was kept. The others appear in no guide.',
+    detail: 'Only one operation can keep a repeated identifier. Each of the others is given one derived from its method and path, which changes if the path does and is not the name its author chose.',
     fix: 'Make each `operationId` unique.',
   });
   add({

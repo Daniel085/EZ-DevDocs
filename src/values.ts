@@ -15,7 +15,7 @@ export interface SampleValues {
 }
 
 const SPEC_ID = 'https://spec.invalid/openapi';
-const VAR = /\{\{\s*[A-Za-z_][A-Za-z0-9_]*\s*\}\}/;
+const VAR = /\{\{[a-z][a-z0-9_]*\}\}/;
 
 export const hasVariable = (v: Json): boolean => typeof v === 'string' && VAR.test(v);
 
@@ -46,8 +46,15 @@ export class SchemaChecker {
   private ajv: any;
   private is30: boolean;
   private cache = new Map<Json, ((v: Json) => boolean) | null>();
+  /** Header and query names that a security scheme uses to carry a credential. */
+  credentialNames: { headers: Set<string>; query: Set<string> } = { headers: new Set(), query: new Set() };
 
   constructor(model: SpecModel) {
+    for (const scheme of Object.values(model.securitySchemes)) {
+      if (scheme?.type !== 'apiKey' || typeof scheme.name !== 'string') continue;
+      if (scheme.in === 'header') this.credentialNames.headers.add(scheme.name.toLowerCase());
+      if (scheme.in === 'query') this.credentialNames.query.add(scheme.name);
+    }
     this.is30 = model.openapi.startsWith('3.0');
     this.ajv = new Ajv2020({ strict: false, allErrors: true, logger: false, validateFormats: true });
     addFormats(this.ajv);
@@ -85,7 +92,32 @@ function variablePaths(value: Json, base = '', out: string[] = []): string[] {
   return out;
 }
 
-/** Checks inline sample values against the operation. Returns human-readable problems. */
+const CONTROLLED_HEADERS = new Set(
+  ['Authorization', 'Cookie', 'Host', 'Content-Type', 'Content-Length', 'Transfer-Encoding', 'Connection', 'Forwarded', 'X-Real-IP', 'Via', 'TE', 'Trailer', 'Upgrade', 'Keep-Alive', 'Expect', 'Origin', 'Referer', 'X-HTTP-Method', 'X-HTTP-Method-Override', 'X-Method-Override'].map((h) => h.toLowerCase()),
+);
+
+/** A header a sample cannot set, because the portal sets it (contract 4.3). */
+export function isControlledHeader(name: string): boolean {
+  const n = name.toLowerCase();
+  return CONTROLLED_HEADERS.has(n) || /^(x-forwarded-|proxy-|sec-|x-ezdp-)/.test(n);
+}
+
+/** Header and query names in a sample that the operation does not declare. A warning, not an error. */
+export function undeclaredParameters(op: Operation, values: Json): string[] {
+  const out: string[] = [];
+  if (!values || typeof values !== 'object') return out;
+  for (const [key, loc] of [['query', 'query'], ['headers', 'header']] as const) {
+    const given = values[key];
+    if (!given || typeof given !== 'object' || Array.isArray(given)) continue;
+    for (const name of Object.keys(given)) {
+      const declared = op.parameters.some((p) => p.in === loc && (loc === 'header' ? p.name.toLowerCase() === name.toLowerCase() : p.name === name));
+      if (!declared) out.push(`'${name}' is not a declared ${loc} parameter of ${op.id}.`);
+    }
+  }
+  return out;
+}
+
+/** Checks inline sample values against the operation. Returns human-readable problems, each an `invalid-sample`. */
 export function validateSampleValues(op: Operation, values: Json, checker: SchemaChecker): string[] {
   const errors: string[] = [];
   if (!values || typeof values !== 'object' || Array.isArray(values)) return ['Sample values must be a JSON object.'];
@@ -103,18 +135,28 @@ export function validateSampleValues(op: Operation, values: Json, checker: Schem
     const same = (a: string, b: string) => (loc === 'header' ? a.toLowerCase() === b.toLowerCase() : a === b);
     for (const name of Object.keys(given)) {
       const param = params.find((p) => same(p.name, name));
+      const v = given[name];
+      if (loc === 'header') {
+        if (isControlledHeader(name)) errors.push(`Header '${name}' is set by the portal and cannot be sent by a sample.`);
+        if (!/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name)) errors.push(`'${name}' is not a valid header name.`);
+        if (typeof v === 'string' && /[\r\n\0]/.test(v)) errors.push(`The value of header '${name}' contains a line break or NUL.`);
+        if (checker.credentialNames.headers.has(name.toLowerCase())) errors.push(`Header '${name}' carries a credential, which the portal adds.`);
+      }
+      if (loc === 'query' && checker.credentialNames.query.has(name)) errors.push(`Query parameter '${name}' carries a credential, which the portal adds.`);
       if (!param) {
-        errors.push(`'${name}' is not a ${loc} parameter of ${op.id}.`);
+        // An undeclared path name is an error. An undeclared header or query name is only a warning.
+        if (loc === 'path') errors.push(`'${name}' is not a path parameter of ${op.id}.`);
         continue;
       }
-      const v = given[name];
       if (hasVariable(v)) continue;
       const res = checker.check(param.schema, v);
       if (res === null) errors.push(`The schema of ${loc} parameter '${name}' could not be compiled.`);
       else for (const e of res) errors.push(`${loc} parameter '${name}' ${e.message}.`);
     }
     for (const p of params) {
-      if (p.required && !Object.keys(given).some((n) => same(p.name, n))) errors.push(`Required ${loc} parameter '${p.name}' is missing.`);
+      // Values the portal supplies itself are never missing: credentials, and the headers it controls.
+      const portals = (loc === 'header' && (isControlledHeader(p.name) || checker.credentialNames.headers.has(p.name.toLowerCase()))) || (loc === 'query' && checker.credentialNames.query.has(p.name));
+      if (p.required && !portals && !Object.keys(given).some((n) => same(p.name, n))) errors.push(`Required ${loc} parameter '${p.name}' is missing.`);
     }
   }
   const hasBody = 'body' in values && values.body !== undefined;
