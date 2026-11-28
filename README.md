@@ -80,9 +80,19 @@ every later call uses it, so a guide never repeats what the reference already sa
 
 A request body can also refer to another record by identifier, such as `customer_id` on a site. When
 the field has the name of the path parameter of a resource the spec can create, the guide creates
-that record first, captures its identifier and sends it in place of the example value. Up to five
-such steps are added to a page, each one after whatever its own body needs. A field that matches
-nothing keeps its example value and is listed as a gap in the report.
+that record first, captures its identifier and sends it in place of the example value. These steps
+sit in a block of their own, "Before you start", so the task's steps begin at the task. Up to eight
+are added to a page, each after whatever its own body needs. Two different example identifiers in
+one body are two records, and each is created. A list of identifiers (`tag_ids`) is handled the same
+way. A field that matches nothing keeps its example value and is listed as a gap in the report.
+
+A step is titled as the spec titles its operation ("Book a visit"), and generically ("Create a
+visit") only when the operation has no summary. A guide changes or deletes only a record it
+created: one that starts from a list reads the first record and stops there.
+
+Navigation follows the spec's tags where operations have them: one group per tag, in the order the
+spec lists its tags, with each tutorial beside the resource it starts from. A spec without tags
+gets one group of guides and one of tutorials.
 
 ## Rules it holds itself to
 
@@ -117,6 +127,23 @@ nothing keeps its example value and is listed as a gap in the report.
 Some APIs do not publish one OpenAPI file. `scripts/fetch-retavon-spec.mjs` assembles one for the
 Retavon API from its per-operation and per-schema reads; it needs an API key in `RETAVON_API_KEY`.
 The assembled document belongs to the API's owner and is not kept in this repository.
+
+## Running the guides against a real API
+
+```bash
+GUIDES_API_KEY=... node scripts/run-guides.ts out/guides --spec path/to/openapi.yaml --vary --out results.json
+```
+
+`scripts/run-guides.ts` sends every `<Sample>` of every page, in order, carrying captured values
+forward as the portal would, and says which pages work. It makes real calls, including ones that
+create and delete records, so point it at a sandbox. `--only` and `--skip` take a pattern of page
+slugs; `--dry-run` sends nothing. It is a development tool and not part of the module, which never
+touches the network.
+
+A spec's example values are fixed, so a guide that creates a record with a unique field (a phone
+number, a code) runs once per account and then meets "already exists". With `--vary` the script
+changes the refused value and tries again, and reports such pages separately from pages that pass
+as written. A list that comes back empty is reported as nothing to list, not as a failure.
 
 ## The report
 

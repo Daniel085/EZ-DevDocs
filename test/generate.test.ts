@@ -336,3 +336,94 @@ test('without a record of what was generated, every existing page is kept', () =
   assert.equal(text(second.files.get('pages/orders/manage.md')!), text(first.files.get('pages/orders/manage.md')!));
   assert.ok(second.report.pages.filter((p) => p.outcome === 'written').every((p) => p.kept === 'edited'));
 });
+
+test('a guide only changes or deletes a record it created', () => {
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/keys': { get: { operationId: 'listKeys', responses: { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' } } } } } } } } } },
+      '/keys/{key_id}': {
+        parameters: [{ name: 'key_id', in: 'path', required: true, schema: { type: 'string' } }],
+        get: { operationId: 'getKey', responses: { '200': { description: 'ok' } } },
+        patch: { operationId: 'updateKey', requestBody: { content: { 'application/json': { schema: { type: 'object', properties: { name: { type: 'string', example: 'a' } } } } } }, responses: { '200': { description: 'ok' } } },
+        delete: { operationId: 'deleteKey', responses: { '204': { description: 'gone' } } },
+      },
+    },
+  };
+  const { files, report } = generate(JSON.stringify(spec), { manifestSchema });
+  const page = text(files.get('pages/keys/browse.md')!);
+  assert.match(page, /operation="listKeys"[\s\S]*operation="getKey"/);
+  assert.doesNotMatch(page, /deleteKey|updateKey/);
+  assert.deepEqual(report.pages.find((p) => p.page === 'keys/browse')!.operations, ['listKeys', 'getKey']);
+});
+
+test('two example identifiers in one body are two records; a list of identifiers is bound too', () => {
+  const thing = { type: 'object', properties: { id: { type: 'string' } } };
+  const created = (schema: unknown) => ({ '201': { description: 'ok', content: { 'application/json': { schema } } } });
+  const body = (schema: unknown) => ({ required: true, content: { 'application/json': { schema } } });
+  const spec = {
+    openapi: '3.1.0',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    tags: [{ name: 'Selling' }, { name: 'Catalog' }],
+    paths: {
+      '/items': { post: { operationId: 'createItem', summary: 'Add an item', tags: ['Catalog'], requestBody: body({ type: 'object', properties: { sku: { type: 'string', example: 'A-1' } } }), responses: created(thing) } },
+      '/items/{item_id}': { get: { operationId: 'getItem', tags: ['Catalog'], parameters: [{ name: 'item_id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } } } },
+      '/labels': { post: { operationId: 'createLabel', tags: ['Catalog'], requestBody: body({ type: 'object', properties: { name: { type: 'string', example: 'new' } } }), responses: created(thing) } },
+      '/labels/{label_id}': { get: { operationId: 'getLabel', tags: ['Catalog'], parameters: [{ name: 'label_id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } } } },
+      '/orders': {
+        post: {
+          operationId: 'createOrder',
+          summary: 'Write up an order',
+          tags: ['Selling'],
+          requestBody: body({
+            type: 'object',
+            properties: { label_ids: { type: 'array', items: { type: 'string' } }, lines: { type: 'array', items: { type: 'object', properties: { item_id: { type: 'string' } } } } },
+            examples: [{ label_ids: ['l-1'], lines: [{ item_id: 'i-1' }, { item_id: 'i-2' }, { item_id: 'i-1' }] }],
+          }),
+          responses: created(thing),
+        },
+      },
+      '/orders/{order_id}': { get: { operationId: 'getOrder', summary: 'Get an order', tags: ['Selling'], parameters: [{ name: 'order_id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok', content: { 'application/json': { schema: thing } } } } } },
+    },
+  };
+  const { files, manifest, validation } = generate(JSON.stringify(spec), { manifestSchema, reportSchema });
+  assert.deepEqual(errorsOf(validation), []);
+  const page = text(files.get('pages/orders/manage.md')!);
+  assert.match(page, /capture="item_id=\$\.id"[\s\S]*capture="item_id_2=\$\.id"/, 'each different example item is created');
+  assert.match(page, /"item_id": "\{\{item_id\}\}"[\s\S]*"item_id": "\{\{item_id_2\}\}"[\s\S]*"item_id": "\{\{item_id\}\}"/, 'the same example is the same record');
+  assert.match(page, /"label_ids": \[\s*"\{\{label_id\}\}"\s*\]/);
+  assert.doesNotMatch(page, /"(i-1|i-2|l-1)"/);
+
+  // Prerequisites sit in their own block, and steps are named as the spec names them.
+  const before = page.indexOf('## Before you start');
+  const task = page.indexOf('## Create the order, then retrieve it');
+  assert.ok(before > 0 && task > before && page.indexOf('operation="createItem"') < task && page.indexOf('operation="createOrder"') > task);
+  assert.match(page, /<Step title="Add an item">[\s\S]*<Step title="Write up an order">[\s\S]*<Step title="Get an order">/);
+
+  // Navigation follows the spec's tags, in the spec's order.
+  assert.deepEqual(manifest.nav.filter((n: { group?: string }) => n.group).map((n: { group: string; items: { page: string }[] }) => [n.group, n.items.map((i) => i.page)]), [
+    ['Selling', ['orders/manage']],
+    ['Catalog', ['items/manage', 'labels/manage']],
+  ]);
+});
+
+test('titles keep the path segments that tell resources apart', () => {
+  const list = { '200': { description: 'ok', content: { 'application/json': { schema: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' } } } } } } } };
+  const one = (id: string) => ({ get: { operationId: id, parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }], responses: { '200': { description: 'ok' } } } });
+  const spec = {
+    openapi: '3.0.3',
+    info: { title: 'T', version: '1' },
+    servers: [{ url: 'https://api.example.test' }],
+    paths: {
+      '/v1/treasury/transactions': { get: { operationId: 'listTreasury', responses: list } },
+      '/v1/treasury/transactions/{id}': one('getTreasury'),
+      '/v1/issuing/transactions': { get: { operationId: 'listIssuing', responses: list } },
+      '/v1/issuing/transactions/{id}': one('getIssuing'),
+    },
+  };
+  const { report } = generate(JSON.stringify(spec), { manifestSchema });
+  assert.deepEqual(report.pages.filter((p) => p.type === 'how-to').map((p) => p.title).sort(), ['List and retrieve issuing transactions', 'List and retrieve treasury transactions']);
+});

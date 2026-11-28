@@ -11,6 +11,8 @@ export interface Resource {
   idParam?: string;
   /** Plural, lower-case words, for example "payment intents". */
   noun: string;
+  /** The noun with the path segments before it, which tell resources of one name apart: "treasury transactions". */
+  label: string;
   slug: string;
   tag?: string;
   create?: Operation;
@@ -73,6 +75,7 @@ export function findResources(model: SpecModel): Resource[] {
       itemPath,
       idParam: itemPath ? segments(itemPath).at(-1)!.slice(1, -1) : undefined,
       noun: plural(words(last)),
+      label: (segs.some(isParam) ? [] : named.slice(0, -1).map(words)).concat(plural(words(last))).join(' '),
       slug,
       tag: (create ?? get ?? list ?? update ?? remove)?.tags[0],
       create,
@@ -288,7 +291,7 @@ export const newPrereqState = (reserved: string[] = []): PrereqState => ({
 });
 
 const snake = (s: string) => s.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
-const MAX_PREREQ_STEPS = 5;
+const MAX_PREREQ_STEPS = 8;
 const MAX_PREREQ_DEPTH = 2;
 
 /**
@@ -326,42 +329,54 @@ export function bindBodyIds(
   const available = new Map(Object.entries(opts.available ?? {}).map(([k, v]) => [snake(k), v]));
   const saved = { steps: state.steps.length, vars: new Map(state.vars), unresolved: new Set(state.unresolved), reserved: new Set(state.reserved) };
 
-  const resolve = (key: string): string | undefined => {
-    if (available.has(key)) return available.get(key);
-    if (state.vars.has(key)) return state.vars.get(key);
+  /** `slot` is `key` for the first record of a kind a body names, `key#2` for a second, different one. */
+  const resolve = (key: string, slot: string, nth: number): string | undefined => {
+    if (nth === 1 && available.has(key)) return available.get(key);
+    if (state.vars.has(slot)) return state.vars.get(slot);
     const r = creatorOf(resources, key, exclude);
     if (!r || depth >= MAX_PREREQ_DEPTH || state.steps.length >= MAX_PREREQ_STEPS) return undefined;
-    const variable = idVariable(r);
+    const variable = idVariable(r) + (nth > 1 ? `_${nth}` : '');
     const idPath = idPathInResponse(model, r.create!, r.idParam!);
     let made = buildValues(model, checker, r.create!);
     if (!made.ok || !idPath || state.reserved.has(variable)) return undefined;
     made = bindBodyIds(model, checker, resources, r.create!, made, state, { exclude: [...exclude, r], depth: depth + 1 });
     state.reserved.add(variable);
-    state.vars.set(key, `{{${variable}}}`);
+    state.vars.set(slot, `{{${variable}}}`);
     state.steps.push({ resource: r, op: r.create!, built: made, variable, idPath, field: key, neededBy: op });
-    return state.vars.get(key);
+    return state.vars.get(slot);
   };
 
   let changed = false;
   const missing: string[] = [];
+  // Two different example identifiers in one body name two different records, so each gets its own.
+  const literals = new Map<string, string[]>();
+  const bind = (field: string, key: string, v: string): string => {
+    const seen = literals.get(key) ?? [];
+    if (!seen.includes(v)) literals.set(key, [...seen, v]);
+    const nth = literals.get(key)!.indexOf(v) + 1;
+    const ref = resolve(key, nth > 1 ? `${key}#${nth}` : key, nth);
+    if (ref) changed = true;
+    else missing.push(field);
+    return ref ?? v;
+  };
+  const isId = (v: Json): v is string => typeof v === 'string' && v !== '' && !v.includes('{{');
   const walk = (node: Json): Json => {
     if (Array.isArray(node)) return node.map(walk);
     if (!node || typeof node !== 'object') return node;
     const out: Json = {};
     for (const [k, v] of Object.entries(node)) {
-      if (typeof v === 'string' && v !== '' && !v.includes('{{') && /_id$/.test(snake(k))) {
-        const ref = resolve(snake(k));
-        if (ref) changed = true;
-        else missing.push(k);
-        out[k] = ref ?? v;
-      } else out[k] = walk(v);
+      const key = snake(k);
+      if (isId(v) && /_id$/.test(key)) out[k] = bind(k, key, v);
+      else if (Array.isArray(v) && v.length > 0 && v.every(isId) && /_ids$/.test(key)) out[k] = v.map((x) => bind(k, key.replace(/_ids$/, '_id'), x));
+      else out[k] = walk(v);
     }
     return out;
   };
   const bound = walk(body);
   // Only a field that names a path parameter somewhere in the spec is known to identify a record.
   const known = new Set(model.operations.flatMap((o) => o.parameters.filter((x) => x.in === 'path').map((x) => snake(x.name))));
-  for (const k of missing) if (known.has(snake(k))) state.unresolved.add(k);
+  const knownField = (k: string) => known.has(snake(k)) || known.has(snake(k).replace(/_ids$/, '_id'));
+  for (const k of missing) if (knownField(k)) state.unresolved.add(k);
   if (!changed) return built;
   if (validateSampleValues(op, { ...built.values, body: bound }, checker).length) {
     // The body does not validate with variables in it: keep the examples and take back the steps.
@@ -369,7 +384,7 @@ export function bindBodyIds(
     state.vars = saved.vars;
     state.reserved = saved.reserved;
     state.unresolved = saved.unresolved;
-    for (const k of missing) if (known.has(snake(k))) state.unresolved.add(k);
+    for (const k of missing) if (knownField(k)) state.unresolved.add(k);
     return built;
   }
   return { ...built, values: { ...built.values, body: bound }, exampleName: undefined };

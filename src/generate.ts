@@ -21,9 +21,10 @@ import {
 } from './pages.ts';
 import { compareCodePoints, loadSpec, sha256, type Json } from './spec.ts';
 import { CONTRACT_VERSION, validateBundle, type BundleFiles, type Finding, type ValidationReport } from './validate.ts';
+import { meta } from './text.ts';
 import { SchemaChecker } from './values.ts';
 
-export const GENERATOR = { name: 'ez-devdocs', version: '0.2.0' };
+export const GENERATOR = { name: 'ez-devdocs', version: '0.3.0' };
 
 export interface GenerateOptions {
   manifestSchema: Json;
@@ -106,18 +107,40 @@ interface OutPage {
   slug: string;
   type: string;
   bytes: Uint8Array;
+  /** The spec tag the page belongs under, when its resource has one. */
+  group?: string;
 }
 
-/** Navigation as this module orders it: the quickstart, then one group per page type. */
-function freshNav(pages: OutPage[]): Json[] {
+/**
+ * Navigation as this module orders it: the quickstart, the concept pages, then the guides. Where
+ * the spec tags its operations, guides and tutorials are grouped by tag, in the order the spec
+ * lists its tags, so a tutorial sits with the resource it starts from. Otherwise by page type.
+ */
+function freshNav(pages: OutPage[], tagOrder: string[]): Json[] {
   const entry = (p: OutPage) => ({ page: p.slug });
   const nav: Json[] = pages.filter((p) => p.type === 'quickstart').map(entry);
-  for (const [type, group] of Object.entries(GROUPS)) {
-    const items = pages.filter((p) => p.type === type).map(entry);
-    if (items.length) nav.push({ group, items });
+  const concepts = pages.filter((p) => p.type === 'concept').map(entry);
+  if (concepts.length) nav.push({ group: GROUPS.concept, items: concepts });
+  const guides = pages.filter((p) => p.type === 'how-to' || p.type === 'tutorial');
+  const byTag = new Set(guides.map((p) => p.group).filter((g): g is string => !!g)).size > 1;
+  if (byTag) {
+    const names = [...new Set(guides.map((p) => groupName(p)))];
+    const rank = (n: string) => (tagOrder.indexOf(n) < 0 ? tagOrder.length : tagOrder.indexOf(n));
+    names.sort((a, b) => rank(a) - rank(b) || names.indexOf(a) - names.indexOf(b));
+    for (const name of names) nav.push({ group: name, items: guides.filter((p) => groupName(p) === name).map(entry) });
+  } else {
+    for (const type of ['how-to', 'tutorial']) {
+      const items = guides.filter((p) => p.type === type).map(entry);
+      if (items.length) nav.push({ group: GROUPS[type], items });
+    }
   }
+  const reference = pages.filter((p) => p.type === 'reference').map(entry);
+  if (reference.length) nav.push({ group: GROUPS.reference, items: reference });
   return nav;
 }
+
+/** The navigation group a page goes in: its tag as plain text, or the group for its type. */
+const groupName = (p: OutPage) => (p.group && meta(p.group, 80)) || GROUPS[p.type] || GROUPS['how-to']!;
 
 /** A person's navigation, kept: entries for pages that are gone are removed, new pages are added. */
 function mergeNav(existing: Json, pages: OutPage[]): Json[] {
@@ -142,12 +165,12 @@ function mergeNav(existing: Json, pages: OutPage[]): Json[] {
   for (const p of pages) {
     if (seen.has(p.slug)) continue;
     const entry = { page: p.slug };
-    const group = GROUPS[p.type];
-    if (!group) nav.unshift(entry);
+    if (p.type === 'quickstart') nav.unshift(entry);
     else {
-      const at = nav.find((x) => x.group === group && Array.isArray(x.items));
+      const names = [groupName(p), GROUPS[p.type]];
+      const at = nav.find((x) => names.includes(x.group) && Array.isArray(x.items));
       if (at) at.items = [...at.items, entry];
-      else nav.push({ group, items: [entry] });
+      else nav.push({ group: names[0], items: [entry] });
     }
   }
   return nav;
@@ -236,11 +259,11 @@ export function generate(spec: string | Uint8Array, options: GenerateOptions): G
       exists = new Set(pages.map((p) => p.slug));
       continue;
     }
-    out = pages.map((p) => ({ slug: p.slug, type: p.type, bytes: prev.kept.get(p.slug) ?? enc.encode(p.body) }));
+    out = pages.map((p) => ({ slug: p.slug, type: p.type, bytes: prev.kept.get(p.slug) ?? enc.encode(p.body), group: p.group }));
     const generated = new Set(pages.map((p) => p.slug));
     for (const [slug, bytes] of prev.kept) if (!generated.has(slug)) out.push({ slug, type: typeOfPage(bytes), bytes });
     navKept = prev.nav !== undefined && !prev.navIsOurs;
-    bundle = assemble(out, navKept ? mergeNav(prev.nav, out) : freshNav(out), prev.assets, model, options);
+    bundle = assemble(out, navKept ? mergeNav(prev.nav, out) : freshNav(out, model.tags.map((t) => meta(t.name, 80))), prev.assets, model, options);
     validation = validate(bundle.files);
     const before = dropped.size;
     for (const f of validation.findings) {
