@@ -7,6 +7,20 @@ turned off are left out by the API and were not seen.
 This covers the API description only: what a tool that reads OpenAPI can learn from it. It does not
 assess how the API behaves, and no call that changes data was made.
 
+## Update, 2026-11-28
+
+Re-read with every available feature switched on: 795 operations, 643 paths, 1,154 schemas.
+
+- **Finding 3 is fixed.** Every path parameter now has an example (467 of 467).
+- **Finding 6 is fixed.** `setNextNumber` has an example.
+- **Finding 1 stands**, on all 795 operations. Findings 2 and 4 stand.
+- **Finding 5:** five create operations now do not show the new identifier, up from two, because
+  more of the API is visible. The generator's list is in `spec-audit.generated.md`.
+- **Finding 7:** 61 operations, up from 34, for the same reason.
+
+The generated guides were also run against a real business for the first time. See "What running
+the guides showed" at the end; it adds two findings, 8 and 9.
+
 ## Summary
 
 From this description a guide generator produced 89 pages and used 241 of the 565 operations in a
@@ -131,3 +145,48 @@ These limited the generated guides too, and are faults or limits of the generato
   `sales_order_line_id` and `package_id`, because nothing was matched that creates them.
 - `updateMessageTemplate` was left out of its guide because no valid request body could be built.
 - Whether the generated flows run was not tested; they were read, not executed.
+
+## What running the guides showed
+
+On 2026-11-28 the generated guides were sent, call by call, to a Retavon business, with the key of
+an agent that acts for no staff member. 236 pages were run; pages that email, text, charge a card,
+issue a key or send feedback were left out. The per-page results are in `run-results.json`.
+
+| Outcome | Pages |
+|---|---|
+| Passed as written | 7 |
+| Passed once an example value was changed | 77 |
+| Nothing to list | 16 |
+| Failed | 136 |
+
+### 8. Example values can be used once
+
+Examples are fixed, and many name something that must be unique: a phone number, a branch code
+`BOI`, a brand `Hot Spring`, a ledger account `6600`. The first guide to create that record works.
+Every later one, and every second reader, gets `409 customer_exists` or `409 conflict`. 77 of the
+84 pages that work at all work only after such a value is changed.
+
+This is a property of examples, not a fault in Retavon's. It still matters to anyone following a
+guide in a business that already has data.
+
+**What would help.** Say in the description of each unique field that it is unique (several already
+do). Where a refusal names the field and value, as `conflict` does, keep doing so: that is what let
+a tool recover. `customer_exists` names the customer but not which phone number or email collided.
+
+### 9. What an agent key may not do is not in the description of the operation
+
+32 pages failed because a call by an agent key "is put to a person" and refused: `createStaffMember`,
+`createRole`, `addContactPoint`, `mergeCustomers`, `giveStoreCredit` and others. Six more failed
+because the key "acts for nobody" and the call needs a staff member named. The refusals are clear.
+The description carries the rule in `x-agent-proposes` and `x-required-permission`, which standard
+tools do not read, so a guide cannot warn a reader before the call.
+
+**What would help.** This is finding 1 again: state it in the operation's `description`, which every
+tool shows, as well as in the extension.
+
+### The rest of the failures are not Retavon's
+
+- 43 pages sent an example identifier that no earlier step had created. That is the generator's.
+- 43 pages hit a business rule because of the order or state the generator chose, such as
+  refunding an order that has no payment.
+- 2 pages failed because the test tool changed a value it should not have.
